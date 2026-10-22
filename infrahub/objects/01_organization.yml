@@ -1,0 +1,9 @@
+# Manufacturer of the lab switches. Depends on: nothing, load first.
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: OrganizationManufacturer
+  data:
+    - name: Arista
+      description: Arista Networks

@@ -1,0 +1,23 @@
+# Platform and device type of the leafs. Depends on: 01_organization.yml.
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: DcimPlatform
+  data:
+    - name: Arista EOS
+      description: Arista EOS (cEOS-lab container)
+      manufacturer: Arista
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: DcimDeviceType
+  data:
+    - name: cEOS-lab
+      description: Arista cEOS-lab container image
+      manufacturer: Arista
+      part_number: cEOS-lab
+      height: 1
+      full_depth: false

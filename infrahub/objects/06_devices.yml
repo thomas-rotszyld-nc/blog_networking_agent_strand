@@ -1,0 +1,89 @@
+# The two leafs with their interfaces. Depends on: 02 (site), 03 (group), 04 (type, platform), 05 (VLANs, addresses).
+# The device location is a Generic (LocationHosting): the concrete kind is given. IP addresses are referenced by
+# their human-friendly id [namespace, address]; VLANs by their name.
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: DcimDevice
+  data:
+    - name: leaf1
+      description: Access switch 1 (cEOS)
+      status: active
+      role: leaf
+      device_type: cEOS-lab
+      platform: Arista EOS
+      location:
+        kind: LocationSite
+        data:
+          name: lab
+      member_of_groups:
+        - leafs
+      primary_address: ["default", "172.20.20.11/24"]
+      interfaces:
+        kind: InterfacePhysical
+        data:
+          - name: Management0
+            description: management
+            role: management
+            status: active
+            ip_addresses:
+              - ["default", "172.20.20.11/24"]
+          - name: Ethernet1
+            description: access port VLAN 10
+            role: access
+            status: active
+            l2_mode: access
+            untagged_vlan: USERS
+          - name: Ethernet2
+            description: access port VLAN 20
+            role: access
+            status: active
+            l2_mode: access
+            untagged_vlan: VOICE
+          - name: Ethernet3
+            description: access port VLAN 30
+            role: access
+            status: active
+            l2_mode: access
+            untagged_vlan: IOT
+    - name: leaf2
+      description: Access switch 2 (cEOS)
+      status: active
+      role: leaf
+      device_type: cEOS-lab
+      platform: Arista EOS
+      location:
+        kind: LocationSite
+        data:
+          name: lab
+      member_of_groups:
+        - leafs
+      primary_address: ["default", "172.20.20.12/24"]
+      interfaces:
+        kind: InterfacePhysical
+        data:
+          - name: Management0
+            description: management
+            role: management
+            status: active
+            ip_addresses:
+              - ["default", "172.20.20.12/24"]
+          - name: Ethernet1
+            description: access port VLAN 10
+            role: access
+            status: active
+            l2_mode: access
+            untagged_vlan: USERS
+          - name: Ethernet2
+            description: access port VLAN 20
+            role: access
+            status: active
+            l2_mode: access
+            untagged_vlan: VOICE
+          - name: Ethernet3
+            description: access port VLAN 30
+            role: access
+            status: active
+            l2_mode: access
+            untagged_vlan: IOT

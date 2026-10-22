@@ -1,0 +1,10 @@
+# The single site of the lab. LocationSite (extensions/location_site) hosts devices and scopes the VLAN group.
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: LocationSite
+  data:
+    - name: lab
+      description: Containerlab lab site
+      status: active

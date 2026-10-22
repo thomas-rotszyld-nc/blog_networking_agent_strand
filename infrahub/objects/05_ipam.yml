@@ -1,0 +1,49 @@
+# VLAN group scoped to the site, the three intended VLANs, and the management addresses of the leafs.
+# Depends on: 02_location.yml. The VLAN group scope is a Generic (IpamVLANGroupScope): the concrete kind is given.
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamVLANGroup
+  data:
+    - name: lab-vlans
+      description: VLANs of the lab site
+      scope:
+        kind: LocationSite
+        data:
+          name: lab
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamVLAN
+  data:
+    - name: USERS
+      vlan_id: 10
+      status: active
+      role: user
+      vlan_group: lab-vlans
+    - name: VOICE
+      vlan_id: 20
+      status: active
+      role: user
+      vlan_group: lab-vlans
+    - name: IOT
+      vlan_id: 30
+      status: active
+      role: user
+      vlan_group: lab-vlans
+
+---
+apiVersion: infrahub.app/v1
+kind: Object
+spec:
+  kind: IpamIPAddress
+  data:
+    - address: 172.20.20.11/24
+      description: leaf1 management
+      status: active
+    - address: 172.20.20.12/24
+      description: leaf2 management
+      status: active
