@@ -1,0 +1,44 @@
+! Startup configuration rendered by Infrahub for leaf1
+no aaa root
+!
+username admin privilege 15 role network-admin secret admin
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname leaf1
+!
+spanning-tree mode mstp
+!
+vlan 10
+   name USERS
+!
+vlan 20
+   name VOICE
+!
+vlan 30
+   name IOT
+!
+management api http-commands
+   no shutdown
+!
+interface Ethernet1
+   description access port VLAN 10
+   switchport access vlan 10
+!
+interface Ethernet2
+   description access port VLAN 20
+   switchport access vlan 20
+!
+interface Ethernet3
+   description access port VLAN 30
+   switchport access vlan 30
+!
+interface Management0
+   description management
+   ip address 172.20.20.11/24
+!
+no ip routing
+!
+end

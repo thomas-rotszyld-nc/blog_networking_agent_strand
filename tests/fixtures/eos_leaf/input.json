@@ -1,0 +1,163 @@
+{
+  "data": {
+    "DcimDevice": {
+      "edges": [
+        {
+          "node": {
+            "name": {
+              "value": "leaf1"
+            },
+            "primary_address": {
+              "node": {
+                "address": {
+                  "value": "172.20.20.11/24"
+                }
+              }
+            },
+            "location": {
+              "node": {
+                "name": {
+                  "value": "lab"
+                },
+                "vlan_groups": {
+                  "edges": [
+                    {
+                      "node": {
+                        "vlans": {
+                          "edges": [
+                            {
+                              "node": {
+                                "name": {
+                                  "value": "USERS"
+                                },
+                                "vlan_id": {
+                                  "value": 10
+                                }
+                              }
+                            },
+                            {
+                              "node": {
+                                "name": {
+                                  "value": "IOT"
+                                },
+                                "vlan_id": {
+                                  "value": 30
+                                }
+                              }
+                            },
+                            {
+                              "node": {
+                                "name": {
+                                  "value": "VOICE"
+                                },
+                                "vlan_id": {
+                                  "value": 20
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "interfaces": {
+              "edges": [
+                {
+                  "node": {
+                    "name": {
+                      "value": "Management0"
+                    },
+                    "description": {
+                      "value": "management"
+                    },
+                    "role": {
+                      "value": "management"
+                    },
+                    "l2_mode": {
+                      "value": null
+                    },
+                    "untagged_vlan": {
+                      "node": null
+                    }
+                  }
+                },
+                {
+                  "node": {
+                    "name": {
+                      "value": "Ethernet2"
+                    },
+                    "description": {
+                      "value": "access port VLAN 20"
+                    },
+                    "role": {
+                      "value": "access"
+                    },
+                    "l2_mode": {
+                      "value": "access"
+                    },
+                    "untagged_vlan": {
+                      "node": {
+                        "vlan_id": {
+                          "value": 20
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "node": {
+                    "name": {
+                      "value": "Ethernet1"
+                    },
+                    "description": {
+                      "value": "access port VLAN 10"
+                    },
+                    "role": {
+                      "value": "access"
+                    },
+                    "l2_mode": {
+                      "value": "access"
+                    },
+                    "untagged_vlan": {
+                      "node": {
+                        "vlan_id": {
+                          "value": 10
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "node": {
+                    "name": {
+                      "value": "Ethernet3"
+                    },
+                    "description": {
+                      "value": "access port VLAN 30"
+                    },
+                    "role": {
+                      "value": "access"
+                    },
+                    "l2_mode": {
+                      "value": "access"
+                    },
+                    "untagged_vlan": {
+                      "node": {
+                        "vlan_id": {
+                          "value": 30
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

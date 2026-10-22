@@ -1,0 +1,41 @@
+# Everything the eos_leaf template needs for one device: its name, its management address,
+# the VLANs of its site (site -> VLAN groups -> VLANs) and its interfaces with their access VLAN.
+query leaf_config($device: String!) {
+  DcimDevice(name__value: $device) {
+    edges {
+      node {
+        name { value }
+        primary_address { node { address { value } } }
+        location {
+          node {
+            ... on LocationSite {
+              name { value }
+              vlan_groups {
+                edges {
+                  node {
+                    vlans {
+                      edges { node { name { value } vlan_id { value } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        interfaces {
+          edges {
+            node {
+              name { value }
+              description { value }
+              role { value }
+              ... on InterfaceLayer2 {
+                l2_mode { value }
+                untagged_vlan { node { vlan_id { value } } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

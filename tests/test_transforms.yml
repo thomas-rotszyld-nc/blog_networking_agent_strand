@@ -1,0 +1,16 @@
+---
+version: "1.0"
+infrahub_tests:
+  - resource: Jinja2Transform
+    resource_name: eos_leaf
+    tests:
+      - name: smoke_eos_leaf
+        spec:
+          kind: jinja2-transform-smoke
+      - name: render_leaf1
+        spec:
+          kind: jinja2-transform-unit-render
+          directory: tests/fixtures/eos_leaf
+          input: input.json
+          output: output.txt
+        expect: PASS

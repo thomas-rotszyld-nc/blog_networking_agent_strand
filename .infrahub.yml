@@ -1,0 +1,22 @@
+# What Infrahub reads when it clones this repository (registered read-only by install.sh):
+# one GraphQL query, one Jinja2 transform, one artifact definition rendering a startup-config per leaf.
+# Schema and data are NOT loaded from here: install.sh loads infrahub/schema and infrahub/objects with infrahubctl.
+---
+queries:
+  - name: leaf_config
+    file_path: infrahub/queries/leaf_config.gql
+
+jinja2_transforms:
+  - name: eos_leaf
+    description: Complete Arista EOS startup-config of a leaf switch
+    query: leaf_config
+    template_path: infrahub/templates/eos_leaf.j2
+
+artifact_definitions:
+  - name: leaf_startup_config
+    artifact_name: startup-config
+    content_type: text/plain
+    targets: leafs
+    transformation: eos_leaf
+    parameters:
+      device: name__value

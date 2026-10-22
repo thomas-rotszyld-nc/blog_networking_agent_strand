@@ -1,0 +1,51 @@
+{#- Complete EOS startup-config of a leaf. `data` is the response of leaf_config.gql for one device.
+    What moves comes from Infrahub: hostname, VLANs of the site, interfaces and their access VLAN, management address.
+    The rest is the fixed base of every leaf and lives here, not in the data model. Block order follows what EOS
+    prints in `show running-config`, so the diff shown by the agent stays readable. -#}
+{% set d = data.DcimDevice.edges[0].node %}
+{#- Infrahub renders with Jinja2 in async mode, where `map` yields an async generator that `sort` cannot read:
+    collect into plain lists first, then sort. -#}
+{% set vlans = [] %}
+{% for group in d.location.node.vlan_groups.edges %}
+{% for vlan in group.node.vlans.edges %}
+{% set _ = vlans.append(vlan.node) %}
+{% endfor %}
+{% endfor %}
+{% set interfaces = d.interfaces.edges | map(attribute='node') | list %}
+! Startup configuration rendered by Infrahub for {{ d.name.value }}
+no aaa root
+!
+username admin privilege 15 role network-admin secret admin
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname {{ d.name.value }}
+!
+spanning-tree mode mstp
+!
+{% for vlan in vlans | sort(attribute='vlan_id.value') %}
+vlan {{ vlan.vlan_id.value }}
+   name {{ vlan.name.value }}
+!
+{% endfor %}
+management api http-commands
+   no shutdown
+!
+{% for intf in interfaces | sort(attribute='name.value') %}
+interface {{ intf.name.value }}
+{% if intf.description.value %}
+   description {{ intf.description.value }}
+{% endif %}
+{% if intf.l2_mode is defined and intf.l2_mode.value == 'access' and intf.untagged_vlan.node %}
+   switchport access vlan {{ intf.untagged_vlan.node.vlan_id.value }}
+{% endif %}
+{% if intf.name.value == 'Management0' %}
+   ip address {{ d.primary_address.node.address.value }}
+{% endif %}
+!
+{% endfor %}
+no ip routing
+!
+end
