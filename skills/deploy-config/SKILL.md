@@ -17,7 +17,9 @@ to replace its running configuration with that rendering. Two tools, in this ord
 ## Procedure
 
 1. Determine the devices concerned (`leaf1`, `leaf2`, or the one the user named).
-2. For each device, call `preview_config`. If it says "no difference", say so and do not deploy that device.
+2. For each device, call `preview_config`. If it says "no difference", say so and do not deploy that device. Right
+   after a Proposed Change was merged, "no difference" can also mean Infrahub has not re-rendered the artifact yet:
+   tell the user, and suggest `uv run python scripts/wait_artifacts.py leaf1 leaf2 --until-changed` before retrying.
 3. For each device with a difference, show the diff in two or three lines (what is added, what is removed), then call
    `deploy_config` once for that device.
 4. Report per device: deployed, unchanged, refused (with the reason), or failed (with the error).

@@ -66,3 +66,12 @@ def test_reimport_runs_the_mutation(monkeypatch):
     monkeypatch.setattr(api, "repository_id", lambda name, client=None: "repo-1")
     api.reimport_repository(client=c)
     assert any("InfrahubReadOnlyRepositoryImportLastCommit" in q and "repo-1" in q for kind, q in c.calls if kind == "gql")
+
+
+def test_wait_artifacts_can_wait_for_a_change(monkeypatch):
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    same = FakeClient([ready("leaf1", "s1")], {"s1": "hostname leaf1\n"})
+    with pytest.raises(TimeoutError):
+        api.wait_artifacts(["leaf1"], timeout=0, client=same, previous={"leaf1": "hostname leaf1\n"})
+    changed = FakeClient([ready("leaf1", "s2")], {"s2": "hostname leaf1\nvlan 40\n"})
+    assert api.wait_artifacts(["leaf1"], timeout=0, client=changed, previous={"leaf1": "hostname leaf1\n"}) == {"leaf1": "hostname leaf1\nvlan 40\n"}

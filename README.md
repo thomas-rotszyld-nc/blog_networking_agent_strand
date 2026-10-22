@@ -48,7 +48,9 @@ you> Add VLAN 40 GUESTS to site lab and put Ethernet3 of both leafs on it.
 ```
 
 The terminal prints `[infrahub: …]` lines with the session branch and the link of the Proposed Change. Open it in
-Infrahub (`http://localhost:8000`, admin / infrahub), look at the data diff and the artifact diff, merge. Then:
+Infrahub (`http://localhost:8000`, admin / infrahub), look at the data diff and the artifact diff, merge. Infrahub
+re-renders the two startup-configs after the merge; `uv run python scripts/wait_artifacts.py leaf1 leaf2 --until-changed`
+waits for them (otherwise the agent may see "no difference" for a moment). Then:
 
 ```text
 you> Deploy the configuration of the leafs.

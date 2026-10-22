@@ -53,8 +53,12 @@ def fetch_artifact(device: str, name: str = "startup-config", branch: str = "mai
     raise ArtifactNotReady(device)
 
 
-def wait_artifacts(devices: list[str], timeout: int = 600, client=None) -> dict[str, str]:
-    """Polls until every device has a ready artifact; returns {device: content}. TimeoutError names the missing ones."""
+def wait_artifacts(devices: list[str], timeout: int = 600, client=None, previous: dict[str, str] | None = None) -> dict[str, str]:
+    """Polls until every device has a ready artifact; returns {device: content}. TimeoutError names the missing ones.
+
+    With `previous` ({device: content seen before}), an artifact still equal to its previous content does not count:
+    right after a merge, Infrahub's artifact stays Ready with the old body until the worker re-renders it.
+    """
     c = client or globals()["client"]()
     deadline = time.monotonic() + timeout
     contents: dict[str, str] = {}
@@ -62,15 +66,22 @@ def wait_artifacts(devices: list[str], timeout: int = 600, client=None) -> dict[
         for device in devices:
             if device not in contents:
                 try:
-                    contents[device] = fetch_artifact(device, client=c)
+                    content = fetch_artifact(device, client=c)
                 except ArtifactNotReady:
-                    pass
+                    continue
+                if previous is not None and previous.get(device) is not None and _same(content, previous[device]):
+                    continue
+                contents[device] = content
         if len(contents) == len(devices):
             return contents
         if time.monotonic() >= deadline:
             missing = [d for d in devices if d not in contents]
             raise TimeoutError(f"no ready artifact for {', '.join(missing)} after {timeout}s")
         time.sleep(POLL_SECONDS)
+
+
+def _same(a: str, b: str) -> bool:
+    return a.rstrip("\n") == b.rstrip("\n")
 
 
 def repository_id(name: str = REPOSITORY_NAME, client=None) -> str:

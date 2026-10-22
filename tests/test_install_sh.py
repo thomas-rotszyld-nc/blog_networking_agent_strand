@@ -21,3 +21,12 @@ def test_install_sh_reports_all_missing_prereqs():
                        env={"PATH": "/usr/bin:/bin", "HOME": str(ROOT)})
     out = r.stdout + r.stderr
     assert r.returncode == 1 and "images/" in out and "containerlab" in out
+
+
+def test_install_sh_checks_survive_set_e_and_rerun_after_the_demo():
+    s = (ROOT / "install.sh").read_text()
+    assert "$?" not in s                      # every check captures its status with `|| rc=$?`
+    assert "len(vlans) >= 3" in s             # VLAN 40 added by the demo must not break a re-run
+    assert "--env-file infrahub/.env" in s    # only the three compose secrets reach the containers
+    assert "--env-file .env" not in s
+    assert "infrahub/.env" in (ROOT / ".gitignore").read_text()

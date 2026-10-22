@@ -10,7 +10,10 @@ cli() { docker exec "clab-vlan-lab-$1" Cli -p 15 -c "$2"; }
 show() { for d in leaf1 leaf2; do printf '\n== %s\n' "$d"; cli "$d" "show vlan"; done; }
 
 if [ "${1:-}" = "--reset" ]; then
-  echo "== redeploying the leafs from clab/generated (Infrahub's renderings)"
+  set -a; . ./.env; set +a
+  echo "== refreshing clab/generated from Infrahub's current renderings"
+  uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated
+  echo "== redeploying the leafs from clab/generated"
   sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure
   uv run python scripts/wait_leafs.py --timeout 300
   show

@@ -63,19 +63,26 @@ INFRAHUB_SECURITY_SECRET_KEY=$SECRET_KEY
 INFRAHUB_REPO_URL=$REPO_URL
 INFRAHUB_REPO_REF=$REPO_REF
 ENV
-set -a; . ./.env; set +a
+mkdir -p infrahub
+cat > infrahub/.env <<ENV
+# Written by install.sh; not committed. The only variables the Infrahub containers receive: the lab .env holds
+# INFRAHUB_ADDRESS and others that the compose file would pass through to the servers.
+INFRAHUB_INITIAL_ADMIN_TOKEN=$ADMIN_TOKEN
+INFRAHUB_INITIAL_AGENT_TOKEN=$AGENT_TOKEN
+INFRAHUB_SECURITY_SECRET_KEY=$SECRET_KEY
+ENV
 echo "  .env written (repository $REPO_URL @ $REPO_REF)"
 
 step "2/9 Infrahub 1.11.9 (first start: several minutes)"
-mkdir -p infrahub
 [ -f infrahub/docker-compose.yml ] || curl -sfL "$INFRAHUB_COMPOSE_URL" -o infrahub/docker-compose.yml
-docker compose -p vlan-lab -f infrahub/docker-compose.yml --env-file .env up -d
+docker compose -p vlan-lab -f infrahub/docker-compose.yml --env-file infrahub/.env up -d
 i=0
 until curl -sf "$INFRAHUB_ADDR/api/config" >/dev/null 2>&1; do
   i=$((i + 1)); [ $i -gt 90 ] && fail "Infrahub did not answer after 15 minutes: docker compose -p vlan-lab -f infrahub/docker-compose.yml logs infrahub-server"
   sleep 10
 done
 echo "  Infrahub answers at $INFRAHUB_ADDR"
+set -a; . ./.env; set +a   # only now: the lab variables are for infrahubctl, the agent and the MCP servers
 
 step "3/9 schema (schema-library copies in infrahub/schema)"
 uv sync -q
@@ -142,27 +149,30 @@ echo "  $(wc -l < /tmp/vlan-lab-tools.txt | tr -d ' ') tools available"
 step "9/9 checks"
 KO=0
 check() { if [ "$2" = "0" ]; then echo "  [ok] $1"; else echo "  [KO] $1"; KO=1; fi; }
-uv run python - <<'PY'
+# every check runs under `|| rc=1` so that `set -e` lets all of them print before the final verdict
+rc=0; uv run python - <<'PYCHECK' || rc=1
 import sys
 from vlanlab.infrahub_api import client
-c = client()
-vlans = c.filters(kind="IpamVLAN")
+vlans = client().filters(kind="IpamVLAN")
 print(f"  {len(vlans)} VLANs in Infrahub")
-sys.exit(0 if len(vlans) == 3 else 1)
-PY
-check "three VLANs in Infrahub" $?
-[ -s clab/generated/leaf1.cfg ] && [ -s clab/generated/leaf2.cfg ]; check "two rendered startup-configs" $?
+sys.exit(0 if len(vlans) >= 3 else 1)   # at least the three of the seed: the demo adds VLAN 40, re-runs must pass
+PYCHECK
+check "at least the three seeded VLANs in Infrahub" $rc
+rc=0; { [ -s clab/generated/leaf1.cfg ] && [ -s clab/generated/leaf2.cfg ]; } || rc=1
+check "two rendered startup-configs" $rc
 for d in leaf1 leaf2; do
-  uv run python -c "
+  rc=0; uv run python -c "
 from vlanlab.eos import load_inventory, running_config
 import sys
 out = running_config(load_inventory()['$d'])
-sys.exit(0 if all(n in out for n in ('USERS', 'VOICE', 'IOT')) else 1)"; check "$d running-config has the three VLANs" $?
-  uv run python -c "
+sys.exit(0 if all(n in out for n in ('USERS', 'VOICE', 'IOT')) else 1)" || rc=1
+  check "$d running-config has the three VLANs" $rc
+  rc=0; uv run python -c "
 from vlanlab.infrahub_tools import preview_config
 import sys
 out = preview_config(device='$d'); print('    ' + out.splitlines()[0])
-sys.exit(0 if 'no difference' in out else 1)"; check "$d: rendered == running" $?
+sys.exit(0 if 'no difference' in out else 1)" || rc=1
+  check "$d: rendered == running" $rc
 done
 [ "$KO" -eq 0 ] || fail "at least one check failed: see the [KO] lines above"
 

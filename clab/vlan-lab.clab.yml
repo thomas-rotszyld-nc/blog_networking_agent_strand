@@ -1,7 +1,14 @@
 # Two Arista cEOS leafs. Their startup-configs are the artifacts Infrahub rendered, downloaded by install.sh into
 # clab/generated/ (scripts/wait_artifacts.py). Management addresses match the IpamIPAddress objects of Infrahub.
+# The management network is IPv4-only on purpose: with an IPv6 subnet, Containerlab would add a Docker-assigned
+# `ipv6 address` to Management0 after boot, a line Infrahub's rendering cannot know, and every preview would show a diff.
+# Each leaf gets eth1..eth3 so that Ethernet1..3 exist on the switch, as in Infrahub.
 #   sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure
 name: vlan-lab
+
+mgmt:
+  network: vlan-lab
+  ipv4-subnet: 172.20.20.0/24
 
 topology:
   kinds:
@@ -18,3 +25,5 @@ topology:
       startup-config: generated/leaf2.cfg
   links:
     - endpoints: ["leaf1:eth1", "leaf2:eth1"]
+    - endpoints: ["leaf1:eth2", "leaf2:eth2"]
+    - endpoints: ["leaf1:eth3", "leaf2:eth3"]

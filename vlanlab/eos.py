@@ -37,15 +37,32 @@ def _config_lines(config: str) -> list[str]:
     return [line for line in lines if line.strip() and not line.startswith("!") and line.strip() != "end"]
 
 
+SESSION = "configure session infrahub-deploy"
+
+
 def replace_config(params: dict, config: str) -> str:
-    """Replaces the whole running configuration with `config`, saves it, and checks the switch still answers."""
-    commands = ["configure session infrahub-deploy", "rollback clean-config", *_config_lines(config), "commit"]
+    """Replaces the whole running configuration with `config`, saves it, and checks the switch still answers.
+
+    The lines are pasted into a configuration session after `rollback clean-config`. EOS answers `% Invalid input`
+    (or another `%` error) to a line it rejects; if any such line comes back, the session is aborted and nothing is
+    committed: the replacement is all or nothing. Only a clean paste is committed, then saved.
+    """
+    host = params.get("host", "?")
     try:
         with connect(**params) as conn:
-            output = conn.send_config_set(commands, exit_config_mode=False, cmd_verify=False, read_timeout=120)
+            output = conn.send_config_set(["rollback clean-config", *_config_lines(config)], config_mode_command=SESSION,
+                                          exit_config_mode=False, cmd_verify=False, read_timeout=120)
+            rejected = [line.strip() for line in output.splitlines() if line.lstrip().startswith("%")]
+            if rejected:
+                conn.send_command_timing("abort")
+                raise DeployError(f"{host}: the switch rejected part of the rendering, session aborted, nothing committed: "
+                                  + " | ".join(rejected[:5]))
+            output += "\n" + conn.send_command_timing("commit")
             output += "\n" + conn.save_config()
         with connect(**params) as conn:  # a fresh session proves management access survived the replacement
             hostname = conn.send_command("show hostname")
+    except DeployError:
+        raise
     except Exception as exc:  # Netmiko raises many types; the caller only needs one
-        raise DeployError(f"{params.get('host', '?')}: {exc}") from exc
+        raise DeployError(f"{host}: {exc}") from exc
     return f"{output}\nswitch answers after commit: {hostname.strip()}"
