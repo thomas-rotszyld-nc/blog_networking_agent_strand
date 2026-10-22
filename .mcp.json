@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "infrahub": {
+      "command": "sh",
+      "args": ["-c", "set -a; . ./.env; INFRAHUB_MCP_BRANCH_PATTERN='agent/{date}-{hex}' exec uvx infrahub-mcp==1.2.0"]
+    },
+    "netmiko": {
+      "command": "sh",
+      "args": ["-c", "NETMIKO_MCP_CONFIG=netmiko/netmiko-mcp.yml exec uvx --from netmiko-mcp==0.2.0 netmiko-mcp"]
+    }
+  }
+}
