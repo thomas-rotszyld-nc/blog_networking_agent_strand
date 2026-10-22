@@ -1,72 +1,117 @@
-# VLAN Drift Lab Implementation Plan
+# Infrahub Intent-to-Deploy Lab Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. When a task touches Infrahub schema, objects, `.infrahub.yml`, the GraphQL query or the Jinja2 template, also load the matching `infrahub:*` plugin skill (`infrahub-managing-schemas`, `infrahub-managing-objects`, `infrahub-managing-transforms`): its rules are the conventions this plan follows.
 
-**Goal:** A public companion repo that a reader installs with `sh install.sh` and that lets a Strands agent audit, then fix, VLAN drift between NetBox and two Arista cEOS switches running under Containerlab.
+**Goal:** A public companion repo that a reader installs with `sh install.sh`, where a Strands agent changes the intent in Infrahub on a branch, the human merges the Proposed Change, and the agent deploys the configuration Infrahub rendered onto two Arista cEOS switches under Containerlab, then verifies.
 
-**Architecture:** One Strands agent (`agent.py`) gets its tools from two MCP servers (`netbox-mcp-rw` for NetBox, the official `netmiko-mcp` for `show` commands) and one in-repo `@tool` (`configure_vlans`, Netmiko config push). Guardrails are code: a steering handler whitelists `vlan N` / `name X` and caps VLANs per turn; a hook asks the user to confirm every device or NetBox write; a hook prints a link to every NetBox object written. Everything else is installation: NetBox by Compose and seeded over REST, the switches by Containerlab from a startup-config kept in the repo, drift introduced by a separate script.
+**Architecture:** One Strands agent (`agent.py`) gets its tools from two MCP servers (`infrahub-mcp` for Infrahub, `netmiko-mcp` for `show` commands) and two in-repo `@tool`s: `preview_config` (diff rendered vs running, read-only) and `deploy_config` (full replace of the running config with Infrahub's artifact). Guardrails are code: `DeployGuard` steering refuses a missing or unsafe rendering and caps devices per turn; `ConfirmDeploy` asks on the terminal after steering; `ShowInfrahubLinks` prints branch and object links after Infrahub writes. The repo is also the Git repository Infrahub clones (read-only) for the query, the template and the artifact definition; schema and data are loaded by `infrahubctl`.
 
-**Tech Stack:** Python 3.12 + uv, `strands-agents[anthropic]` 1.61.1, `netmiko` 4.7, `netmiko-mcp` 0.2.0 (PyPI), `netbox-mcp-rw` at commit `96705f8ff24b96e98f6d82e6f4fde399e5ac57d9`, NetBox `v4.4.10-3.4.2` (Docker Compose), Containerlab ≥ 0.81, Arista cEOS-lab, pytest.
+**Tech Stack:** Python 3.12 + uv; `strands-agents[anthropic]>=1.61.1,<2`; `netmiko>=4.7,<5`; `infrahub-sdk[all]==1.23.2` (gives `infrahubctl` and the pytest plugin); `infrahub-mcp==1.2.0`; `netmiko-mcp==0.2.0`; Infrahub `1.11.9` (compose from `https://infrahub.opsmill.io/1.11.9`); `opsmill/schema-library` at commit `26336e9026dff1907f2c58e81dd6ae7b5c3f763e`; Containerlab ≥ 0.81; Arista cEOS-lab; pytest.
 
 **Spec:** `docs/superpowers/specs/2026-10-22-vlan-drift-lab-design.md`
 
 ## Global Constraints
 
-- Repo language is English (code, comments, README, skills, system prompt). Licence MIT.
-- Nothing from `strand_agents_lab` data may appear: no `c9500`, `poc`, `NGW`, `strand-agents-lab`, `5trandagent5lab`, `Europe/Paris`, `*-Lab-2026-password`, users `bidder`/`drivers`/`evaluators`.
-- Pinned versions: `strands-agents[anthropic]>=1.61.1,<2`, `netmiko>=4.7,<5`, `netmiko-mcp==0.2.0`, netbox-mcp-rw commit `96705f8ff24b96e98f6d82e6f4fde399e5ac57d9`, NetBox image `netboxcommunity/netbox:v4.4.10-3.4.2`.
-- Fixed values: site slug `lab`; devices `leaf1`/`leaf2`; management IPs `172.20.20.11`/`172.20.20.12` on Containerlab's default `clab` network `172.20.20.0/24`; VLANs `10 USERS`, `20 VOICE`, `30 IOT`; access ports `Ethernet1..3` untagged on 10, 20, 30; cEOS credentials `admin`/`admin`; cEOS image tag `ceos:lab`; Containerlab lab name `vlan-lab` (containers `clab-vlan-lab-leaf1`, `clab-vlan-lab-leaf2`); NetBox port `8091` (override `NETBOX_PORT`); Compose project `vlan-lab`, network subnet `172.30.30.0/24`.
-- Drift: leaf1 lacks VLAN 30; leaf2 has VLAN 20 named `VOIP`; leaf2 has VLAN 99 `LEGACY`.
-- Guard limits: only `vlan <1-4094>` and `name <[A-Za-z0-9_-]{1,32}>`; at most 5 distinct VLAN ids configured per turn; no deletion ever.
-- The confirmation hooks run after steering (`HookOrder.SDK_LAST`) and skip a call already cancelled.
-- `sudo` only around `containerlab` commands; everything else runs as the user.
-- Secrets and generated files are git-ignored: `.env`, `netmiko/*` (except `.gitkeep`), `images/*` (except `.gitkeep`), `netbox-mcp-rw/`, `clab/clab-vlan-lab/`.
-- Every script is idempotent and exits non-zero on the first failure with a message naming the fix.
+- Repo language English; licence MIT; repo `https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand`, default branch `main`.
+- No trace of `strand_agents_lab` data: no `c9500`, `poc`, `NGW`, `strand-agents-lab`, `5trandagent5lab`, `Europe/Paris`, `*-Lab-2026-password`, no NetBox.
+- Fixed names: site `lab` (LocationSite, name `lab`); devices `leaf1`, `leaf2` (DcimDevice, role `leaf`, status `active`, platform `Arista EOS`, device type `cEOS-lab`, manufacturer `Arista`); group `leafs` (CoreStandardGroup); VLAN group `lab-vlans` scoped to the site; VLANs `USERS`/10, `VOICE`/20, `IOT`/30 (IpamVLAN, status `active`); interfaces `Ethernet1..3` (InterfacePhysical, role `access`, status `active`, `l2_mode: access`, `untagged_vlan` 10/20/30) and `Management0` (role `management`); management IPs `172.20.20.11/24`, `172.20.20.12/24` (IpamIPAddress, device `primary_address`); Containerlab lab `vlan-lab` (containers `clab-vlan-lab-leaf1/2`), image tag `ceos:lab`, credentials `admin`/`admin`; Infrahub at `http://localhost:8000`; compose project `vlan-lab`.
+- `.infrahub.yml`: query `leaf_config`, Jinja2 transform `eos_leaf`, artifact definition `leaf_startup_config` (artifact_name `startup-config`, `text/plain`, targets `leafs`, parameters `device: name__value`).
+- infrahub-mcp branch pattern `agent/{date}-{hex}`; netmiko-mcp allowed commands `show vlan*`, `show running-config*`.
+- `DeployGuard`: refuse when the artifact is missing/empty, lacks `hostname <device>`, lacks an `interface Management0` block containing the inventory host IP, lacks `username admin`; at most 2 devices deployed per turn. `ConfirmDeploy` runs at `HookOrder.SDK_LAST` and skips a cancelled call.
+- `sudo` only around `containerlab`; secrets and generated files git-ignored: `.env`, `infrahub/docker-compose.yml`, `netmiko/*`, `images/*`, `clab/generated/*`, `clab/clab-vlan-lab/`.
+- Every script idempotent, POSIX sh, `set -e`, exits non-zero with a message naming the fix.
+- Install order (plugin rule): schema, then objects, then repository registration. The repository definition never lives in `infrahub/objects/`.
 
 ## Review Focus
 
-1. The model sends `VLAN 30` or `vlan  30 ` (case, spacing): the guard must normalise before matching, not refuse a correct intent. Test in Task 7.
-2. A leaf is unreachable (SSH timeout, refused auth): `configure_vlans` returns an error string the model can report, never a traceback that ends the turn. Test in Task 6.
-3. Two `configure_vlans` calls in one turn whose VLAN ids add up past 5 are refused on the second call, and the count resets on the next turn. Test in Task 7.
-4. The chat runs without a terminal (piped stdin, one-shot mode in CI): every confirmation hook refuses instead of hanging or raising. Test in Task 7 and Task 5.
-5. `images/` holds zero or several cEOS archives: `install.sh` stops with the download instructions, or picks one deterministically and says which. Verified in Task 10.
+1. cEOS adds default lines to `show running-config` that no template emits (`no aaa root`, `transceiver qsfp default-mode 4x10G`, `spanning-tree mode mstp`, `! Command:` headers…): `preview_config` must report "no difference" right after a clean deploy, or every demo starts with a false drift. Pinned in Task 7 (normalisation test) and Task 11 (alignment loop against the real running-config).
+2. `deploy_config` on an unreachable or slow leaf must return an error string, never a traceback that ends the turn. Task 6 and Task 7.
+3. A rendering whose management block is missing or points at the wrong IP would lock the operator out: `DeployGuard` refuses it before any confirmation. Task 8.
+4. The agent's `mutate_graphql` writes return raw data: `ShowInfrahubLinks` must still print a usable link (object id from the response, branch from `get_session_info`) and must never raise inside the hook. Task 7.
+5. A reader who forks the repo must only change `INFRAHUB_REPO_URL`; a reader on `images/` with zero or two archives gets one clear message. Task 11.
+
+---
+
+### Task 0: Spike — artifact diff in a Proposed Change with a read-only repository
+
+**Files:**
+- Create: `docs/spike-readonly-repo.md`
+- Throwaway: a branch `spike/readonly-repo` of this repo holding a minimal `.infrahub.yml`, `infrahub/queries/leaf_config.gql`, `infrahub/templates/eos_leaf.j2` (hostname + VLAN list only), the schema files and object files of Task 2 (do them first if you prefer; the spike only needs schema + one device + VLANs + group).
+
+**Interfaces:**
+- Produces: a go/no-go for the read-only repository design, recorded in the doc; the real artifact wait time and the UI tab where the artifact diff appears.
+
+- [ ] **Step 1: Stand up Infrahub in the dev VM**
+
+Run: `mkdir -p infrahub && curl -sL https://infrahub.opsmill.io/1.11.9 -o infrahub/docker-compose.yml && INFRAHUB_INITIAL_ADMIN_TOKEN=$(uuidgen | tr A-F a-f) docker compose -p vlan-lab -f infrahub/docker-compose.yml up -d && until curl -sf http://localhost:8000/api/config >/dev/null; do sleep 10; done; echo up`
+Expected: `up` within a few minutes; UI at `http://localhost:8000` (admin / infrahub).
+
+- [ ] **Step 2: Load schema and a minimal data set, register the spike branch read-only**
+
+Run (with `INFRAHUB_ADDRESS` and `INFRAHUB_API_TOKEN` exported): `uv run infrahubctl schema load infrahub/schema --wait 60 && uv run infrahubctl object load infrahub/objects && git push -u origin spike/readonly-repo && uv run infrahubctl repository add blog-lab https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand --read-only --ref spike/readonly-repo`
+Expected: in the UI, Repository `blog-lab` reaches status `in-sync`; two `CoreArtifact` nodes of definition `leaf_startup_config` appear with status `Ready`. Note the elapsed time.
+
+- [ ] **Step 3: Data branch + Proposed Change, look for the artifact diff**
+
+Run: `uv run infrahubctl branch create spike-change` then in the UI (or with `infrahubctl object load --branch spike-change` on an edited VLAN file) rename VLAN `IOT` to `IOT2` on branch `spike-change`; create a Proposed Change `spike-change → main` in the UI.
+Expected: the Proposed Change shows a data diff and, in its Artifacts tab (or checks), a per-device artifact diff with the renamed VLAN. Record exactly where it appears and how long it took. If no artifact diff appears after 5 minutes, record that too.
+
+- [ ] **Step 4: Template change + re-import**
+
+Edit the template (add a comment line), commit, push to `spike/readonly-repo`, then run the mutation `InfrahubReadOnlyRepositoryImportLastCommit(data: {id: "<repo id>"}) { ok }` through `uv run infrahubctl` (GraphQL) or `curl` on `/graphql`.
+Expected: repository commit advances and the two artifacts re-render with the comment line. Record the time.
+
+- [ ] **Step 5: Write `docs/spike-readonly-repo.md` and decide**
+
+Contents: what was run, what appeared where, timings, the decision: read-only repo confirmed, or fall back to `CoreRepository` with GitHub credentials (then update the spec's Git section before continuing). Tear down: `docker compose -p vlan-lab -f infrahub/docker-compose.yml down -v`; delete the Infrahub branch; keep the GitHub spike branch until Task 3 replaces it.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git checkout main && git add docs/spike-readonly-repo.md && git commit -m "docs: spike result, read-only repository and artifact diff in proposed changes"
+```
 
 ---
 
 ### Task 1: Repository skeleton
 
 **Files:**
-- Create: `pyproject.toml`, `.gitignore`, `.python-version`, `LICENSE`, `.env.example`, `images/.gitkeep`, `netmiko/.gitkeep`, `vlanlab/__init__.py`, `tests/__init__.py`, `tests/test_skeleton.py`
+- Create: `pyproject.toml`, `.python-version`, `.gitignore`, `LICENSE`, `.env.example`, `images/.gitkeep`, `netmiko/.gitkeep`, `clab/generated/.gitkeep`, `vlanlab/__init__.py`, `tests/__init__.py`, `tests/test_skeleton.py`
 
 **Interfaces:**
-- Produces: the package name `vlanlab` every later module lives in; `uv run pytest` as the test command.
+- Produces: package `vlanlab`; `uv run pytest` as the test command; `uv run infrahubctl` available.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_skeleton.py
+import shutil, subprocess
+
 def test_dependencies_import():
-    import netmiko, strands, strands.models.anthropic  # noqa: F401
+    import netmiko, strands, strands.models.anthropic, infrahub_sdk  # noqa: F401
+
+def test_infrahubctl_is_in_the_venv():
+    assert subprocess.run(["uv", "run", "infrahubctl", "version"], capture_output=True).returncode == 0
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `cd ~/blog_networking_agent_strand && uv run pytest tests/test_skeleton.py -q`
-Expected: fails (no pyproject, or `ModuleNotFoundError: netmiko`).
+Expected: FAIL (no pyproject / modules missing).
 
-- [ ] **Step 3: Write `pyproject.toml`**
+- [ ] **Step 3: Write `pyproject.toml`, `.python-version` (`3.12`)**
 
-Project `vlan-drift-lab`, `requires-python = ">=3.12"`, dependencies `strands-agents[anthropic]>=1.61.1,<2` and `netmiko>=4.7,<5`, dev dependency group `pytest>=8`, `license = "MIT"`, `[project.urls] Repository = "https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand"`. `.python-version` is `3.12`.
+Project `infrahub-intent-lab`, `requires-python = ">=3.12"`, dependencies `strands-agents[anthropic]>=1.61.1,<2`, `netmiko>=4.7,<5`, `infrahub-sdk[all]==1.23.2`; dev group `pytest>=8`; `license = "MIT"`; `[project.urls] Repository`. `[tool.pytest.ini_options] testpaths = ["tests"]`.
 
-- [ ] **Step 4: Write `.gitignore`, `LICENSE` (MIT, year 2026, the repo owner's name), `.env.example`, the two `.gitkeep`, the two empty `__init__.py`**
+- [ ] **Step 4: Write `.gitignore`, `LICENSE` (MIT, 2026, repo owner), `.env.example`, the `.gitkeep`s, empty `__init__.py`s**
 
-`.gitignore` covers: `__pycache__/`, `*.py[oc]`, `.venv`, `.env`, `netbox-mcp-rw/`, `netmiko/*` + `!netmiko/.gitkeep`, `images/*` + `!images/.gitkeep`, `clab/clab-vlan-lab/`, `.pytest_cache/`.
-`.env.example` lists, with a one-line comment each and empty values: `ANTHROPIC_API_KEY`, `NETBOX_URL`, `NETBOX_TOKEN`, `NETBOX_RW_TOKEN`, `NETBOX_SUPERUSER_TOKEN`, `NETBOX_SECRET_KEY`.
+`.gitignore`: `__pycache__/`, `*.py[oc]`, `.venv`, `.env`, `.pytest_cache/`, `infrahub/docker-compose.yml`, `netmiko/*` + `!netmiko/.gitkeep`, `images/*` + `!images/.gitkeep`, `clab/generated/*` + `!clab/generated/.gitkeep`, `clab/clab-vlan-lab/`.
+`.env.example` keys with one comment line each, values empty: `ANTHROPIC_API_KEY`, `INFRAHUB_ADDRESS`, `INFRAHUB_API_TOKEN`, `INFRAHUB_INITIAL_ADMIN_TOKEN`, `INFRAHUB_INITIAL_AGENT_TOKEN`, `INFRAHUB_SECURITY_SECRET_KEY`, `INFRAHUB_REPO_URL`, `INFRAHUB_REPO_REF`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `uv sync --group dev && uv run pytest tests/test_skeleton.py -q`
-Expected: `1 passed`.
+Expected: `2 passed`.
 
 - [ ] **Step 6: Commit**
 
@@ -76,138 +121,243 @@ git add -A && git commit -m "chore: repository skeleton (uv project, MIT licence
 
 ---
 
-### Task 2: NetBox by Compose
+### Task 2: Infrahub schema and object files
 
 **Files:**
-- Create: `docker-compose.yml`, `netbox/netbox.env`, `netbox/bootstrap_token.sh`, `tests/test_compose.py`
+- Create: `infrahub/schema/00_organization.yml`, `01_location.yml`, `02_dcim.yml`, `03_ipam.yml`, `04_location_site.yml`, `05_vlan.yml` (copies from schema-library at the pinned commit, header comment added: source path, commit, licence); `infrahub/objects/01_organization.yml`, `02_location.yml`, `03_groups.yml`, `04_dcim_types.yml`, `05_ipam.yml`, `06_devices.yml`; `tests/test_infrahub_files.py`
 
 **Interfaces:**
-- Consumes: `.env` variables `NETBOX_SUPERUSER_TOKEN`, `NETBOX_SECRET_KEY`, `NETBOX_PORT` (written by Task 10's `install.sh`; for manual runs the developer exports them).
-- Produces: NetBox at `http://localhost:${NETBOX_PORT:-8091}/`, admin `admin`/`admin`, superuser API token `NETBOX_SUPERUSER_TOKEN`; `sh netbox/bootstrap_token.sh` creates that token if the image did not.
+- Produces: `uv run infrahubctl schema load infrahub/schema --wait 60` then `uv run infrahubctl object load infrahub/objects` yield the decor of the spec on a fresh Infrahub.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/test_compose.py
-import re, pathlib
+# tests/test_infrahub_files.py
+import pathlib, yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def test_compose_has_no_lab_traces_and_pins_the_image():
-    text = (ROOT / "docker-compose.yml").read_text() + (ROOT / "netbox/netbox.env").read_text()
-    assert "netboxcommunity/netbox:v4.4.10-3.4.2" in text
-    assert "172.30.30.0/24" in text
-    assert "name: vlan-lab" in text
-    for trace in ("strand", "poc", "5trandagent5lab", "europe/paris"):
-        assert trace not in text.lower()
+def docs(path):
+    return [d for d in yaml.safe_load_all(path.read_text()) if d]
 
-def test_secrets_come_from_env_not_files():
-    env = (ROOT / "netbox/netbox.env").read_text()
-    assert not re.search(r"^SUPERUSER_API_TOKEN=\S", env, re.M)
-    assert not re.search(r"^SECRET_KEY=\S", env, re.M)
-    compose = (ROOT / "docker-compose.yml").read_text()
-    assert "SUPERUSER_API_TOKEN: ${NETBOX_SUPERUSER_TOKEN}" in compose
-    assert "SECRET_KEY: ${NETBOX_SECRET_KEY}" in compose
+def test_schema_files_are_pinned_copies():
+    files = sorted((ROOT / "infrahub/schema").glob("*.yml"))
+    assert [f.name[3:] for f in files] == ["organization.yml", "location.yml", "dcim.yml", "ipam.yml", "location_site.yml", "vlan.yml"]
+    for f in files:
+        assert "26336e9026dff1907f2c58e81dd6ae7b5c3f763e" in f.read_text().splitlines()[1]
+
+def test_objects_match_the_scenario():
+    objs = {}
+    for f in sorted((ROOT / "infrahub/objects").glob("*.yml")):
+        for d in docs(f):
+            assert d["apiVersion"] == "infrahub.app/v1" and d["kind"] == "Object"
+            objs.setdefault(d["spec"]["kind"], []).extend(d["spec"]["data"])
+    assert [v["name"] for v in objs["IpamVLAN"]] == ["USERS", "VOICE", "IOT"]
+    assert [v["vlan_id"] for v in objs["IpamVLAN"]] == [10, 20, 30]
+    assert objs["IpamVLANGroup"][0]["scope"]["kind"] == "LocationSite"
+    assert [g["name"] for g in objs["CoreStandardGroup"]] == ["leafs"]
+    devices = objs["DcimDevice"]
+    assert [d["name"] for d in devices] == ["leaf1", "leaf2"]
+    for d in devices:
+        assert d["member_of_groups"] == ["leafs"] and d["role"] == "leaf"
+        names = [i["name"] for i in d["interfaces"]["data"]]
+        assert names == ["Management0", "Ethernet1", "Ethernet2", "Ethernet3"]
+        assert [i.get("untagged_vlan") for i in d["interfaces"]["data"][1:]] == ["USERS", "VOICE", "IOT"]
+    assert sorted(ip["address"] for ip in objs["IpamIPAddress"]) == ["172.20.20.11/24", "172.20.20.12/24"]
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `uv run pytest tests/test_compose.py -q`
+Run: `uv run pytest tests/test_infrahub_files.py -q`
 Expected: FAIL, files missing.
 
-- [ ] **Step 3: Write `docker-compose.yml`**
+- [ ] **Step 3: Vendor the six schema files**
 
-Same service graph as `strand_agents_lab/docker-compose.yml` (Postgres 16, two Redis, `netbox`, `netbox-worker`, healthchecks, volumes), with: `name: vlan-lab`; a top-level `networks: default: ipam: config: [subnet: 172.30.30.0/24]`; `environment:` on `netbox` and `netbox-worker` adding `SUPERUSER_API_TOKEN: ${NETBOX_SUPERUSER_TOKEN}` and `SECRET_KEY: ${NETBOX_SECRET_KEY}` on top of `env_file: netbox/netbox.env`; port `"${NETBOX_PORT:-8091}:8080"`. Header comment: what it is, `sh install.sh`, `docker compose down [-v]`.
+For each of `base/organization.yml`, `base/location.yml`, `base/dcim.yml`, `base/ipam.yml`, `extensions/location_site/location_site.yml`, `extensions/vlan/vlan.yml`: `gh api "repos/opsmill/schema-library/contents/<path>?ref=26336e9026dff1907f2c58e81dd6ae7b5c3f763e" -H "Accept: application/vnd.github.raw"` into the numbered file, and insert as line 2 the comment `# Copied from opsmill/schema-library <path> @ 26336e9026dff1907f2c58e81dd6ae7b5c3f763e (Apache-2.0), unmodified.` (line 1 stays the `yaml-language-server` comment of the original).
 
-- [ ] **Step 4: Write `netbox/netbox.env` and `netbox/bootstrap_token.sh`**
+- [ ] **Step 4: Write the object files**
 
-`netbox.env`: the DB/Redis values of the existing file, `ALLOWED_HOSTS=*`, `SKIP_SUPERUSER=false`, `SUPERUSER_NAME=admin`, `SUPERUSER_EMAIL=admin@lab.local`, `SUPERUSER_PASSWORD=admin`, `TIME_ZONE=UTC`; no `SECRET_KEY`, no `SUPERUSER_API_TOKEN` lines.
-`bootstrap_token.sh`: the existing script, reading the token from `.env` (`NETBOX_SUPERUSER_TOKEN`) instead of `netbox.env`.
+Load order by number. `01`: `OrganizationManufacturer` Arista. `02`: `LocationSite` `lab` (status `active`). `03`: `CoreStandardGroup` `leafs`. `04`: `DcimPlatform` `Arista EOS` (manufacturer Arista); `DcimDeviceType` `cEOS-lab` (manufacturer Arista). `05`: `IpamVLANGroup` `lab-vlans` with `scope: {kind: LocationSite, data: {name: lab}}`; the three `IpamVLAN` (name, vlan_id, status active, role user, vlan_group `lab-vlans`); two `IpamIPAddress` `172.20.20.11/24`, `172.20.20.12/24` (default namespace). `06`: the two `DcimDevice` with `location: {kind: LocationSite, data: {name: lab}}`, `device_type`, `platform`, `role: leaf`, `status: active`, `member_of_groups: [leafs]`, `primary_address` referencing the device's IP by HFID (check the HFID shape with `uv run infrahubctl schema` once Infrahub runs; the plugin's `infrahub-managing-objects` rules give the scalar-vs-list form), and `interfaces: {kind: InterfacePhysical, data: [...]}` with `Management0` (role management, status active, `ip_addresses` referencing the same IP) and `Ethernet1..3` (role access, status active, `l2_mode: access`, `untagged_vlan: USERS|VOICE|IOT`, description `access port VLAN <vid>`). If `untagged_vlan: USERS` is rejected at load (generic peer), switch to `{kind: IpamVLAN, data: {name: USERS}}` and update the test accordingly.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
-Run: `uv run pytest tests/test_compose.py -q`
+Run: `uv run pytest tests/test_infrahub_files.py -q`
 Expected: `2 passed`.
 
-- [ ] **Step 6: Verify the stack boots (in the dev VM, Docker available)**
+- [ ] **Step 6: Verify against Infrahub (dev VM, Infrahub up as in Task 0 step 1)**
 
-Run:
-```bash
-export NETBOX_SUPERUSER_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(20))') NETBOX_SECRET_KEY=$(python3 -c 'import secrets;print(secrets.token_urlsafe(50))')
-docker compose up -d && until curl -sf http://localhost:8091/login/ >/dev/null; do sleep 5; done && sh netbox/bootstrap_token.sh && curl -s -H "Authorization: Token $NETBOX_SUPERUSER_TOKEN" http://localhost:8091/api/status/ | head -c 200
-```
-Expected: JSON with `"netbox-version": "4.4.10"`.
+Run: `uv run infrahubctl schema load infrahub/schema --wait 60 && uv run infrahubctl object load infrahub/objects && uv run infrahubctl object load infrahub/objects`
+Expected: schema loaded; first object load creates everything, second changes nothing; in the UI `leaf1` has four interfaces, `Ethernet1` shows untagged VLAN `USERS`, group `leafs` has two members.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add docker-compose.yml netbox tests/test_compose.py && git commit -m "feat: NetBox 4.4 by Compose, secrets from .env"
+git add infrahub/schema infrahub/objects tests/test_infrahub_files.py && git commit -m "feat: Infrahub schema (pinned schema-library copies) and lab objects"
 ```
 
 ---
 
-### Task 3: NetBox seed
+### Task 3: The rendering: `.infrahub.yml`, GraphQL query, Jinja2 template
 
 **Files:**
-- Create: `netbox/seed.py`, `tests/test_seed.py`
+- Create: `.infrahub.yml`, `infrahub/queries/leaf_config.gql`, `infrahub/templates/eos_leaf.j2`, `tests/test_transforms.yml`, `tests/fixtures/eos_leaf/input.json`, `tests/fixtures/eos_leaf/output.txt`, `tests/test_infrahub_yml.py`
 
 **Interfaces:**
-- Consumes: env `NETBOX_URL`, `NETBOX_TOKEN` (superuser), `MCP_TOKEN`, `MCP_RW_TOKEN`.
-- Produces: `seed.DESIRED` (module constant, the intended state, importable without network); `python netbox/seed.py` idempotent. Site slug `lab`, devices `leaf1`/`leaf2`, VLANs, interfaces and primary IPs as in Global Constraints; users `mcp` (view only) and `mcp-rw` (view + `add`/`change` on `ipam.vlan` and `dcim.interface`, no delete).
+- Produces: transform `eos_leaf` renders a complete EOS startup-config from `data` (the GraphQL response for one device); artifact definition `leaf_startup_config`; `uv run infrahubctl render eos_leaf device=leaf1` works against a running Infrahub.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```python
-# tests/test_seed.py
-import importlib.util, pathlib
-spec = importlib.util.spec_from_file_location("seed", pathlib.Path(__file__).resolve().parents[1] / "netbox/seed.py")
-seed = importlib.util.module_from_spec(spec); spec.loader.exec_module(seed)
+# tests/test_infrahub_yml.py
+import pathlib
+from infrahub_sdk.schema.repository import InfrahubRepositoryConfig
+import yaml
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def test_desired_state_matches_the_scenario():
-    assert seed.DESIRED["site"] == {"name": "Lab", "slug": "lab"}
-    assert seed.DESIRED["vlans"] == [(10, "USERS"), (20, "VOICE"), (30, "IOT")]
-    assert [d["name"] for d in seed.DESIRED["devices"]] == ["leaf1", "leaf2"]
-    assert [d["mgmt_ip"] for d in seed.DESIRED["devices"]] == ["172.20.20.11/24", "172.20.20.12/24"]
-    assert seed.DESIRED["access_ports"] == {"Ethernet1": 10, "Ethernet2": 20, "Ethernet3": 30}
-
-def test_rw_permissions_cannot_delete():
-    for perm in seed.PERMISSIONS["mcp-rw"]:
-        assert "delete" not in perm["actions"]
+def test_infrahub_yml_is_valid_and_wired():
+    cfg = InfrahubRepositoryConfig(**yaml.safe_load((ROOT / ".infrahub.yml").read_text()))
+    assert [q.name for q in cfg.queries] == ["leaf_config"]
+    t = cfg.jinja2_transforms[0]; assert (t.name, t.query, str(t.template_path)) == ("eos_leaf", "leaf_config", "infrahub/templates/eos_leaf.j2")
+    a = cfg.artifact_definitions[0]
+    assert (a.name, a.artifact_name, a.content_type, a.targets, a.transformation, a.parameters) == \
+        ("leaf_startup_config", "startup-config", "text/plain", "leafs", "eos_leaf", {"device": "name__value"})
+    assert (ROOT / cfg.queries[0].file_path).exists() and (ROOT / t.template_path).exists()
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+```yaml
+# tests/test_transforms.yml
+---
+version: "1.0"
+infrahub_tests:
+  - resource: Jinja2Transform
+    resource_name: eos_leaf
+    tests:
+      - name: smoke_eos_leaf
+        spec: { kind: jinja2-transform-smoke }
+      - name: render_leaf1
+        spec: { kind: jinja2-transform-unit-render, directory: tests/fixtures/eos_leaf, input: input.json, output: output.txt }
+        expect: PASS
+```
 
-Run: `uv run pytest tests/test_seed.py -q`
-Expected: FAIL, file missing.
+- [ ] **Step 2: Run them to verify they fail**
 
-- [ ] **Step 3: Write `netbox/seed.py`**
+Run: `uv run pytest tests/test_infrahub_yml.py tests/test_transforms.yml -q`
+Expected: FAIL, files missing.
 
-Keep the `api()` and `get_or_create()` helpers of the existing seed (stdlib only). Define `DESIRED` and `PERMISSIONS` as module constants; `main()` creates in order: site; manufacturer `Arista`; device type `cEOS-lab` (slug `ceos-lab`); device role `access-switch`; platform `Arista EOS` (slug `arista-eos`); the three VLANs with `site`, `status: active`; the two devices (`status: active`, role, type, site, platform); per device, interface `Management0` (type `1000base-t`, `mgmt_only: true`) and `Ethernet1..3` (type `1000base-t`, `mode: access`, `untagged_vlan` from `DESIRED["access_ports"]`); the IP address `mgmt_ip` assigned to `Management0` (`assigned_object_type: dcim.interface`) and set as the device's `primary_ip4`; users `mcp`/`mcp-rw` with a random password (`secrets.token_urlsafe(16)`, not printed), their tokens from `MCP_TOKEN`/`MCP_RW_TOKEN`, and permissions `lab-read-all` (view on `dcim.site, dcim.device, dcim.interface, dcim.devicetype, dcim.devicerole, dcim.platform, dcim.manufacturer, ipam.vlan, ipam.vlangroup, ipam.ipaddress, core.objectchange`, both users) and `lab-rw-vlans-interfaces` (`view, add, change` on `ipam.vlan, dcim.interface`, user `mcp-rw`). Permissions are PATCHed on every run so re-runs refresh them.
+- [ ] **Step 3: Write `.infrahub.yml` and `infrahub/queries/leaf_config.gql`**
 
-- [ ] **Step 4: Run the test to verify it passes**
+`.infrahub.yml`: the three sections of Global Constraints, nothing else. The query, `query leaf_config($device: String!)`, fetches `DcimDevice(name__value: $device)` with `name`, `primary_address { node { address { value } } }`, `location { node { ... on LocationSite { name { value } vlan_groups { edges { node { vlans { edges { node { name { value } vlan_id { value } } } } } } } } } }`, and `interfaces { edges { node { name { value } description { value } role { value } ... on InterfaceLayer2 { l2_mode { value } untagged_vlan { node { vlan_id { value } } } } } } }`. Verify field names with `uv run infrahubctl schema` or the Infrahub GraphQL sandbox before locking the fixture.
 
-Run: `uv run pytest tests/test_seed.py -q`
-Expected: `2 passed`.
+- [ ] **Step 4: Write `infrahub/templates/eos_leaf.j2` and the fixture**
 
-- [ ] **Step 5: Verify against the running NetBox of Task 2**
+Template reads `data.DcimDevice.edges[0].node`; emits, in this order: `hostname`, `username admin privilege 15 secret admin`, `!`, `service routing protocols model multi-agent`, `!`, one `vlan N` / `   name X` block per VLAN sorted by `vlan_id`, interfaces sorted by name (`Ethernet*` first, then `Management0`) with `   description …` and `   switchport access vlan N` when `l2_mode == "access"` and `untagged_vlan` is set, `interface Management0` with `   ip address <primary_address>`, the `management api http-commands / no shutdown` block, `end`. Three-space EOS indentation, `!` separators. `tests/fixtures/eos_leaf/input.json` is a hand-written GraphQL response for `leaf1` with the three VLANs and four interfaces; `output.txt` is the exact rendering. Task 11 will realign both to what cEOS actually shows in `show running-config`.
 
-Run: `NETBOX_URL=http://localhost:8091 NETBOX_TOKEN=$NETBOX_SUPERUSER_TOKEN MCP_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(20))') MCP_RW_TOKEN=$(python3 -c 'import secrets;print(secrets.token_hex(20))') uv run python netbox/seed.py && uv run python netbox/seed.py`
-Expected: first run prints the created objects, second run creates nothing; `curl -s -H "Authorization: Token $MCP_TOKEN" 'http://localhost:8091/api/ipam/vlans/?site=lab' | python3 -c 'import sys,json;print(json.load(sys.stdin)["count"])'` prints `3`.
+- [ ] **Step 5: Run the tests to verify they pass**
 
-- [ ] **Step 6: Commit**
+Run: `uv run pytest tests/test_infrahub_yml.py tests/test_transforms.yml -q`
+Expected: `3 passed` (one Python test, smoke, unit render).
+
+- [ ] **Step 6: Verify live (dev VM, data of Task 2 loaded)**
+
+Run: `uv run infrahubctl render eos_leaf device=leaf1`
+Expected: the rendered config for leaf1, identical to `output.txt` apart from values that differ between fixture and live data (ideally none).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add netbox/seed.py tests/test_seed.py && git commit -m "feat: seed NetBox with the lab site, two leafs, three VLANs and MCP users"
+git add .infrahub.yml infrahub/queries infrahub/templates tests/test_transforms.yml tests/fixtures tests/test_infrahub_yml.py && git commit -m "feat: leaf_config query, eos_leaf Jinja2 transform and startup-config artifact definition"
 ```
 
 ---
 
-### Task 4: Containerlab topology and cEOS startup-config
+### Task 4: Infrahub bootstrap helpers (artifacts, re-import)
 
 **Files:**
-- Create: `clab/vlan-lab.clab.yml`, `clab/ceos.cfg`, `tests/test_clab.py`
+- Create: `vlanlab/infrahub_api.py`, `scripts/wait_artifacts.py`, `scripts/reimport.sh`, `tests/test_infrahub_api.py`
 
 **Interfaces:**
-- Produces: `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure` brings up `leaf1` (172.20.20.11) and `leaf2` (172.20.20.12), SSH `admin`/`admin`, with the three VLANs and access ports; `--reconfigure` is the reset primitive Task 11 relies on.
+- Produces: `client() -> InfrahubClientSync` (from `INFRAHUB_ADDRESS`/`INFRAHUB_API_TOKEN`); `fetch_artifact(device: str, name: str = "startup-config", branch: str = "main", client=None) -> str` (raises `ArtifactNotReady(device)` when no Ready artifact with a storage_id exists); `wait_artifacts(devices: list[str], timeout: int = 600, client=None) -> dict[str, str]` (polls every 5 s until every device has a Ready artifact, returns contents); `repository_id(name: str, client=None) -> str`; `reimport_repository(name: str = "blog-lab", client=None) -> None` (runs `InfrahubReadOnlyRepositoryImportLastCommit`). `scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated` writes `<device>.cfg` files. `sh scripts/reimport.sh` calls `reimport_repository` then `wait_artifacts`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+# tests/test_infrahub_api.py
+import pytest
+from vlanlab import infrahub_api as api
+
+class Node:
+    def __init__(self, **kw): self.__dict__.update(kw)
+class Attr:
+    def __init__(self, value): self.value = value
+
+class FakeClient:
+    def __init__(self, artifacts, blobs): self.artifacts, self.blobs, self.calls = artifacts, blobs, []
+    def filters(self, kind, **kw): self.calls.append((kind, kw)); return self.artifacts
+    class object_store:
+        blobs = {}
+        @classmethod
+        def get(cls, identifier): return cls.blobs[identifier]
+    def execute_graphql(self, query, **kw): self.calls.append(("gql", query)); return {"InfrahubReadOnlyRepositoryImportLastCommit": {"ok": True}}
+
+def ready(device, storage):
+    return Node(status=Attr("Ready"), storage_id=Attr(storage), object=Node(peer=Node(display_label=device)))
+
+def test_fetch_artifact_returns_body(monkeypatch):
+    c = FakeClient([ready("leaf1", "s1")], {}); FakeClient.object_store.blobs = {"s1": "hostname leaf1\nend\n"}
+    assert api.fetch_artifact("leaf1", client=c) == "hostname leaf1\nend\n"
+
+def test_fetch_artifact_not_ready():
+    c = FakeClient([Node(status=Attr("Pending"), storage_id=Attr(None), object=Node(peer=Node(display_label="leaf1")))], {})
+    with pytest.raises(api.ArtifactNotReady): api.fetch_artifact("leaf1", client=c)
+
+def test_wait_artifacts_times_out(monkeypatch):
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    c = FakeClient([], {})
+    with pytest.raises(TimeoutError): api.wait_artifacts(["leaf1"], timeout=0, client=c)
+
+def test_reimport_runs_the_mutation(monkeypatch):
+    c = FakeClient([], {}); monkeypatch.setattr(api, "repository_id", lambda name, client=None: "repo-1")
+    api.reimport_repository(client=c)
+    assert any("InfrahubReadOnlyRepositoryImportLastCommit" in q for kind, q in c.calls if kind == "gql")
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `uv run pytest tests/test_infrahub_api.py -q`
+Expected: FAIL, module missing.
+
+- [ ] **Step 3: Implement `vlanlab/infrahub_api.py`**
+
+Use `infrahub_sdk.InfrahubClientSync` (`Config(address, api_token)`). `fetch_artifact`: `client.filters(kind="CoreArtifact", definition__name__value="leaf_startup_config", branch=branch, include=["object"])`, keep those whose `object.peer.display_label == device`, `status.value == "Ready"` and `storage_id.value`; read `client.object_store.get(storage_id)`. If the SDK filter names differ in 1.23.2, adjust the fake to the real call shape. `wait_artifacts`: loop with `time.sleep(5)` until all devices resolve or `timeout` seconds pass → `TimeoutError` naming the missing devices. `reimport_repository`: `execute_graphql` with the mutation from the spec.
+
+- [ ] **Step 4: Write `scripts/wait_artifacts.py` and `scripts/reimport.sh`**
+
+`wait_artifacts.py`: argparse (`devices`, `--out`, `--timeout 600`), writes each content to `<out>/<device>.cfg`, prints one line per file. `reimport.sh`: `uv run python -c "from vlanlab.infrahub_api import reimport_repository; reimport_repository()"` then `uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated`.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `uv run pytest tests/test_infrahub_api.py -q`
+Expected: `4 passed`.
+
+- [ ] **Step 6: Verify live (repo registered as in Task 0 / Task 11)**
+
+Run: `uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated && head -3 clab/generated/leaf1.cfg`
+Expected: two files written; `hostname leaf1` in the first lines.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add vlanlab/infrahub_api.py scripts tests/test_infrahub_api.py && git commit -m "feat: Infrahub artifact fetch/wait helpers and read-only repository re-import"
+```
+
+---
+
+### Task 5: Containerlab topology
+
+**Files:**
+- Create: `clab/vlan-lab.clab.yml`, `tests/test_clab.py`
+
+**Interfaces:**
+- Produces: `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure` boots `leaf1`/`leaf2` from `clab/generated/leaf1.cfg` / `leaf2.cfg`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -216,146 +366,56 @@ git add netbox/seed.py tests/test_seed.py && git commit -m "feat: seed NetBox wi
 import pathlib, yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def test_topology():
+def test_topology_uses_generated_startup_configs():
     topo = yaml.safe_load((ROOT / "clab/vlan-lab.clab.yml").read_text())
     assert topo["name"] == "vlan-lab"
+    assert topo["topology"]["kinds"]["arista_ceos"]["image"] == "ceos:lab"
     nodes = topo["topology"]["nodes"]
-    assert nodes["leaf1"]["mgmt-ipv4"] == "172.20.20.11" and nodes["leaf2"]["mgmt-ipv4"] == "172.20.20.12"
-    assert topo["topology"]["kinds"]["arista_ceos"] == {"image": "ceos:lab", "startup-config": "ceos.cfg"}
-
-def test_startup_config_matches_netbox():
-    cfg = (ROOT / "clab/ceos.cfg").read_text()
-    for vid, name in ((10, "USERS"), (20, "VOICE"), (30, "IOT")):
-        assert f"vlan {vid}\n   name {name}" in cfg
-    for port, vid in (("Ethernet1", 10), ("Ethernet2", 20), ("Ethernet3", 30)):
-        assert f"interface {port}\n   switchport access vlan {vid}" in cfg
-    assert "{{ .ShortName }}" in cfg and "{{ .MgmtIPv4Address }}" in cfg
+    assert nodes["leaf1"] == {"mgmt-ipv4": "172.20.20.11", "startup-config": "generated/leaf1.cfg"}
+    assert nodes["leaf2"] == {"mgmt-ipv4": "172.20.20.12", "startup-config": "generated/leaf2.cfg"}
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `uv run pytest tests/test_clab.py -q`
-Expected: FAIL, files missing (pyyaml comes with netmiko).
+Expected: FAIL, file missing.
 
 - [ ] **Step 3: Write `clab/vlan-lab.clab.yml`**
 
-`name: vlan-lab`; `topology.kinds.arista_ceos: {image: ceos:lab, startup-config: ceos.cfg}`; nodes `leaf1`, `leaf2` of kind `arista_ceos` with their `mgmt-ipv4`; one link `leaf1:eth1 <-> leaf2:eth1` so Ethernet1 exists on both. No `mgmt` block (default `clab` network).
+`name: vlan-lab`; `topology.kinds.arista_ceos.image: ceos:lab`; nodes `leaf1`/`leaf2` with `mgmt-ipv4` and `startup-config: generated/<name>.cfg` (relative to the topology file); one link `leaf1:eth1 <-> leaf2:eth1`.
 
-- [ ] **Step 4: Write `clab/ceos.cfg`**
-
-Start from Containerlab's default cEOS template (`nodes/ceos/ceos.cfg` in srl-labs/containerlab: hostname, `username admin privilege 15 secret admin`, routing model, default route, `interface {{ .MgmtIntf }}` with `{{ .MgmtIPv4Address }}/{{ .MgmtIPv4PrefixLength }}`, management APIs), dropping the VRF branches, and add after the hostname block the three `vlan N / name X` stanzas and the three `interface EthernetN / switchport access vlan N` stanzas with the exact indentation the test expects (three spaces). One file serves both leafs: the template variables carry the per-node values.
-
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 4: Run the test to verify it passes**
 
 Run: `uv run pytest tests/test_clab.py -q`
-Expected: `2 passed`.
+Expected: `1 passed`.
 
-- [ ] **Step 6: Verify in the dev VM (cEOS archive imported as `ceos:lab`)**
+- [ ] **Step 5: Verify in the dev VM (artifacts downloaded, `ceos:lab` imported)**
 
-Run: `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure && sleep 90 && docker exec clab-vlan-lab-leaf1 Cli -c "show vlan"`
-Expected: a table with VLANs 1, 10 USERS, 20 VOICE, 30 IOT. Note the time cEOS takes to answer SSH; Task 10 uses it.
+Run: `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure && sleep 120 && docker exec clab-vlan-lab-leaf1 Cli -c "show vlan"`
+Expected: VLANs 10 USERS, 20 VOICE, 30 IOT. Note the boot time for Task 11.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add clab tests/test_clab.py && git commit -m "feat: Containerlab topology with two cEOS leafs and a shared startup-config"
+git add clab/vlan-lab.clab.yml tests/test_clab.py && git commit -m "feat: Containerlab topology booting from Infrahub-rendered startup-configs"
 ```
 
 ---
 
-### Task 5: NetBox hooks (confirmation and write links)
+### Task 6: EOS access layer (`vlanlab/eos.py`)
 
 **Files:**
-- Create: `vlanlab/netbox_hooks.py`, `tests/test_netbox_hooks.py`
+- Create: `vlanlab/eos.py`, `tests/test_eos.py`
 
 **Interfaces:**
-- Produces: `object_line(object_type: str, obj: dict) -> str`; `objects_of(result: dict) -> list[dict]`; `class ConfirmNetboxWrites(HookProvider)` with `__init__(self, netbox: MCPClient, ask: Callable[[str], str] = input)` and `register_hooks` at `order=HookOrder.SDK_LAST`; `class ShowWriteLinks(HookProvider)`; constants `NETBOX_WRITE_TOOLS: dict[str, str]` (`netbox_create_object`/`netbox_bulk_create_objects` → `"created"`, `netbox_update_object`/`netbox_bulk_update_objects` → `"updated"`, `netbox_delete_object`/`netbox_bulk_delete_objects` → `"deleted"`).
+- Produces: `INVENTORY_FILE = Path("netmiko/.netmiko.yml")`; `load_inventory(path=INVENTORY_FILE) -> dict[str, dict]`; `connect = ConnectHandler` (module attribute); `running_config(params: dict) -> str`; `replace_config(params: dict, config: str) -> str` (full replacement + save, returns device output; raises `DeployError(str)` on failure or if SSH does not answer afterwards); `class DeployError(Exception)`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-# tests/test_netbox_hooks.py
-import json
-from types import SimpleNamespace
-from vlanlab import netbox_hooks as nh
-
-def result_of(payload, status="success"):
-    return {"status": status, "content": [{"text": json.dumps(payload)}]}
-
-def test_objects_of_handles_object_list_and_junk():
-    assert nh.objects_of(result_of({"id": 1})) == [{"id": 1}]
-    assert nh.objects_of(result_of([{"id": 1}, {"id": 2}])) == [{"id": 1}, {"id": 2}]
-    assert nh.objects_of({"status": "success", "content": [{"text": "not json"}, {}]}) == []
-
-def test_object_line_prefers_display_and_url():
-    assert nh.object_line("vlans", {"id": 7, "display": "USERS (10)", "display_url": "http://nb/ipam/vlans/7/"}) == "USERS (10) (vlans #7) http://nb/ipam/vlans/7/"
-
-def event(name, inputs, cancel_tool=False):
-    return SimpleNamespace(tool_use={"name": name, "input": inputs}, cancel_tool=cancel_tool)
-
-def test_confirm_lets_reads_through_and_asks_for_writes(capsys):
-    hook = nh.ConfirmNetboxWrites(netbox=None, ask=lambda prompt: "n")
-    e = event("netbox_get_objects", {"object_type": "vlans"}); hook.confirm(e); assert e.cancel_tool is False
-    e = event("netbox_create_object", {"object_type": "vlans", "data": {"vid": 99, "name": "LEGACY"}}); hook.confirm(e)
-    assert isinstance(e.cancel_tool, str) and "refused" in e.cancel_tool
-    assert '"vid": 99' in capsys.readouterr().out
-
-def test_confirm_yes_and_already_cancelled():
-    hook = nh.ConfirmNetboxWrites(netbox=None, ask=lambda prompt: "y")
-    e = event("netbox_update_object", {"object_type": "vlans", "object_id": 7, "data": {"name": "VOICE"}}); hook.confirm(e); assert e.cancel_tool is False
-    e = event("netbox_update_object", {"object_type": "vlans", "object_id": 7, "data": {}}, cancel_tool="refused by steering")
-    hook.confirm(e); assert e.cancel_tool == "refused by steering"
-
-def test_confirm_refuses_without_terminal():
-    def eof(prompt): raise EOFError
-    hook = nh.ConfirmNetboxWrites(netbox=None, ask=eof)
-    e = event("netbox_delete_object", {"object_type": "vlans", "object_id": 7}); hook.describe = lambda t, i: f"{t} #{i}"; hook.confirm(e)
-    assert isinstance(e.cancel_tool, str)
-
-def test_show_write_links_prints_one_line_per_object(capsys):
-    e = SimpleNamespace(tool_use={"name": "netbox_create_object", "input": {"object_type": "vlans"}}, cancel_message=None, exception=None,
-                        result=result_of({"id": 7, "display": "LEGACY (99)", "display_url": "u"}))
-    nh.ShowWriteLinks().show(e)
-    assert capsys.readouterr().out.strip() == "[netbox: created LEGACY (99) (vlans #7) u]"
-```
-
-- [ ] **Step 2: Run them to verify they fail**
-
-Run: `uv run pytest tests/test_netbox_hooks.py -q`
-Expected: FAIL, module missing.
-
-- [ ] **Step 3: Implement `vlanlab/netbox_hooks.py`**
-
-Port `object_line`, `objects_of`, `ShowWriteLinks` from `strand_agents_lab/netbox_agent.py`, replacing the dead `isinstance(result, Exception)` check by `event.exception`. Generalise `ConfirmDeletes` into `ConfirmNetboxWrites`: for deletes, describe each id with `netbox_get_object_by_id` via `self.netbox.call_tool_sync` inside a `try/except Exception` that falls back to `"{object_type} #{object_id}: lookup failed ({error})"`; for creates/updates, print the `object_type`, the `object_id` if any, and `json.dumps(data, indent=2)`; then `ask("  Confirm? [y/N] ")`, `EOFError` → refuse; a refusal sets `event.cancel_tool = "Write refused by the user. Do not retry it; tell the user it was not done."`. Return early when `event.cancel_tool` is already set. `register_hooks` uses `registry.add_callback(BeforeToolCallEvent, self.confirm, order=HookOrder.SDK_LAST)`.
-
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `uv run pytest tests/test_netbox_hooks.py -q`
-Expected: `6 passed`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add vlanlab/netbox_hooks.py tests/test_netbox_hooks.py && git commit -m "feat: NetBox write confirmation and write-link hooks"
-```
-
----
-
-### Task 6: The `configure_vlans` tool
-
-**Files:**
-- Create: `vlanlab/device_tool.py`, `tests/test_device_tool.py`
-
-**Interfaces:**
-- Consumes: the Netmiko Tools inventory `netmiko/.netmiko.yml` written by Task 10 (`leaf1`, `leaf2`: `device_type`, `host`, `username`, `password`).
-- Produces: `INVENTORY_FILE = Path("netmiko/.netmiko.yml")`; `load_inventory(path: Path = INVENTORY_FILE) -> dict[str, dict]`; `connect = ConnectHandler` (module attribute, swapped in tests); `@tool configure_vlans(device: str, commands: list[str]) -> str`; `TOOL_NAME = "configure_vlans"`.
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-# tests/test_device_tool.py
-import pathlib, textwrap, pytest
-from vlanlab import device_tool as dt
+# tests/test_eos.py
+import textwrap, pytest
+from vlanlab import eos
 
 INV = textwrap.dedent("""
     leaf1: {device_type: arista_eos, host: 172.20.20.11, username: admin, password: admin}
@@ -363,77 +423,161 @@ INV = textwrap.dedent("""
     leafs: [leaf1, leaf2]
 """)
 
-@pytest.fixture
-def inventory(tmp_path, monkeypatch):
-    p = tmp_path / ".netmiko.yml"; p.write_text(INV)
-    monkeypatch.setattr(dt, "INVENTORY_FILE", p)
-    return p
-
 class FakeConn:
     sent, saved = [], 0
     def __init__(self, **kw): self.kw = kw
     def __enter__(self): return self
     def __exit__(self, *a): pass
-    def send_config_set(self, cmds): FakeConn.sent.extend(cmds); return "\n".join(cmds)
+    def send_command(self, cmd, **kw): return "hostname leaf1\n!\nend\n" if "running" in cmd else "ok"
+    def send_config_set(self, cmds, **kw): FakeConn.sent.extend(cmds); return "\n".join(cmds)
     def save_config(self): FakeConn.saved += 1; return "Copy completed"
 
-def test_load_inventory_skips_groups(inventory):
-    inv = dt.load_inventory(inventory)
-    assert set(inv) == {"leaf1", "leaf2"} and inv["leaf1"]["device_type"] == "arista_eos"
+def test_load_inventory_skips_groups(tmp_path):
+    p = tmp_path / ".netmiko.yml"; p.write_text(INV)
+    inv = eos.load_inventory(p); assert set(inv) == {"leaf1", "leaf2"} and inv["leaf2"]["host"] == "172.20.20.12"
 
-def test_configure_pushes_and_saves(inventory, monkeypatch):
-    monkeypatch.setattr(dt, "connect", FakeConn)
-    out = dt.configure_vlans(device="leaf1", commands=["vlan 30", "name IOT"])
-    assert FakeConn.sent == ["vlan 30", "name IOT"] and FakeConn.saved == 1
-    assert "leaf1" in out and "saved" in out.lower()
+def test_running_config_and_replace(monkeypatch):
+    monkeypatch.setattr(eos, "connect", FakeConn)
+    assert eos.running_config({"host": "x"}).startswith("hostname leaf1")
+    out = eos.replace_config({"host": "x"}, "hostname leaf1\nvlan 40\n   name GUESTS\nend\n")
+    assert "vlan 40" in FakeConn.sent and FakeConn.saved == 1 and isinstance(out, str)
 
-def test_unknown_device_is_an_error_string(inventory, monkeypatch):
-    monkeypatch.setattr(dt, "connect", FakeConn)
-    out = dt.configure_vlans(device="spine1", commands=["vlan 30"])
-    assert out.startswith("Error:") and "leaf1" in out and "leaf2" in out
-
-def test_connection_failure_is_an_error_string(inventory, monkeypatch):
+def test_connection_failure_is_deploy_error(monkeypatch):
     class Boom:
-        def __init__(self, **kw): raise TimeoutError("connection timed out")
-    monkeypatch.setattr(dt, "connect", Boom)
-    out = dt.configure_vlans(device="leaf1", commands=["vlan 30"])
-    assert out.startswith("Error:") and "timed out" in out
-
-def test_strands_sees_the_tool():
-    assert dt.configure_vlans.tool_name == "configure_vlans"
-    assert set(dt.configure_vlans.tool_spec["inputSchema"]["json"]["required"]) == {"device", "commands"}
+        def __init__(self, **kw): raise TimeoutError("timed out")
+    monkeypatch.setattr(eos, "connect", Boom)
+    with pytest.raises(eos.DeployError): eos.replace_config({"host": "x"}, "hostname leaf1\nend\n")
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `uv run pytest tests/test_device_tool.py -q`
+Run: `uv run pytest tests/test_eos.py -q`
 Expected: FAIL, module missing.
 
-- [ ] **Step 3: Implement `vlanlab/device_tool.py`**
+- [ ] **Step 3: Implement `vlanlab/eos.py`**
 
-`load_inventory` uses `netmiko.utilities.load_yaml_file` and `obtain_all_devices` (the same loader `netmiko-mcp` uses, so encryption works the same way) and drops entries that are not dicts (groups). `configure_vlans` is decorated with `from strands import tool`; its docstring is what the model reads: it pushes configuration lines to one lab switch, says the lines must be `vlan N` and `name X` only, and that the user confirms before anything is sent. Body: resolve the device (unknown → `"Error: unknown device '…'. Known devices: leaf1, leaf2"`), `with connect(**params) as conn:` `send_config_set(commands)` then `save_config()`, return `f"{device}: configuration applied and saved.\n{output}"`; any `Exception` → `f"Error: {device}: {exc}"`. Never raise.
+`load_inventory` via `netmiko.utilities.load_yaml_file` + `obtain_all_devices`, dicts only. `running_config`: `send_command("show running-config")`. `replace_config`: open a configuration session and replace atomically: `send_config_set(["configure session agent", "rollback clean-config", *config_lines_without_end, "commit"], exit_config_mode=False, cmd_verify=False)`, then `save_config()`, then reconnect and `send_command("show hostname")` to prove SSH still answers; any exception → `DeployError`. If `rollback clean-config` + `commit` does not behave on cEOS (Task 11 will tell), switch to `netmiko.file_transfer` of the rendered text to `flash:candidate.cfg` and `configure replace flash:candidate.cfg`, keeping the same signature and tests.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/test_device_tool.py -q`
-Expected: `5 passed`.
+Run: `uv run pytest tests/test_eos.py -q`
+Expected: `3 passed`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add vlanlab/device_tool.py tests/test_device_tool.py && git commit -m "feat: configure_vlans Strands tool over Netmiko, sharing the netmiko-mcp inventory"
+git add vlanlab/eos.py tests/test_eos.py && git commit -m "feat: EOS access layer (inventory, running-config, atomic replace)"
 ```
 
 ---
 
-### Task 7: Guards: `VlanGuard` steering and `ConfirmDeviceWrites` hook
+### Task 7: Agent tools and the Infrahub link hook (`vlanlab/infrahub_tools.py`)
+
+**Files:**
+- Create: `vlanlab/infrahub_tools.py`, `tests/test_infrahub_tools.py`
+
+**Interfaces:**
+- Consumes: Task 4 `fetch_artifact`, `ArtifactNotReady`; Task 6 `load_inventory`, `running_config`, `replace_config`, `DeployError`.
+- Produces: `normalize(config: str) -> list[str]` (drops blank lines, lines starting with `!`, trailing spaces, and the `end` line); `config_diff(running: str, rendered: str) -> str` (unified diff of normalised lines, `""` when equal); `@tool preview_config(device: str) -> str`; `@tool deploy_config(device: str) -> str`; `PREVIEW_TOOL = "preview_config"`, `DEPLOY_TOOL = "deploy_config"`; `class ShowInfrahubLinks(HookProvider)` with `__init__(self, infrahub: MCPClient | None, base_url: str)` and `show(event)`; `INFRAHUB_WRITE_TOOLS = ("node_upsert", "mutate_graphql", "propose_changes")`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+# tests/test_infrahub_tools.py
+import json
+from types import SimpleNamespace
+from vlanlab import infrahub_tools as it
+
+RUNNING = "! Command: show running-config\n! device: leaf1 (cEOSLab)\n!\nhostname leaf1\n!\nvlan 10\n   name USERS\n!\nend\n"
+RENDERED = "hostname leaf1\n!\nvlan 10\n   name USERS\n!\nend\n"
+
+def test_normalize_ignores_comments_blank_and_end():
+    assert it.normalize(RUNNING) == it.normalize(RENDERED) == ["hostname leaf1", "vlan 10", "   name USERS"]
+    assert it.config_diff(RUNNING, RENDERED) == ""
+    assert "+vlan 40" in it.config_diff(RUNNING, RENDERED + "vlan 40\n   name GUESTS\n")
+
+def patch_backend(monkeypatch, rendered=RENDERED, running=RUNNING, inventory=None):
+    monkeypatch.setattr(it, "fetch_artifact", lambda device, **kw: rendered)
+    monkeypatch.setattr(it, "running_config", lambda params: running)
+    monkeypatch.setattr(it, "load_inventory", lambda *a, **k: inventory or {"leaf1": {"host": "172.20.20.11"}})
+    pushed = []
+    monkeypatch.setattr(it, "replace_config", lambda params, cfg: pushed.append(cfg) or "done")
+    return pushed
+
+def test_preview_no_difference_and_difference(monkeypatch):
+    patch_backend(monkeypatch)
+    assert it.preview_config(device="leaf1") == "leaf1: no difference between the rendered and the running configuration."
+    patch_backend(monkeypatch, rendered=RENDERED + "vlan 40\n   name GUESTS\n")
+    assert "+vlan 40" in it.preview_config(device="leaf1")
+
+def test_preview_unknown_device_and_missing_artifact(monkeypatch):
+    patch_backend(monkeypatch)
+    assert it.preview_config(device="spine1").startswith("Error:")
+    monkeypatch.setattr(it, "fetch_artifact", lambda device, **kw: (_ for _ in ()).throw(it.ArtifactNotReady("leaf1")))
+    assert it.preview_config(device="leaf1").startswith("Error:") and "artifact" in it.preview_config(device="leaf1").lower()
+
+def test_deploy_pushes_rendered_and_reports(monkeypatch):
+    pushed = patch_backend(monkeypatch, rendered=RENDERED + "vlan 40\n   name GUESTS\n")
+    out = it.deploy_config(device="leaf1")
+    assert pushed and "GUESTS" in pushed[0] and out.startswith("leaf1:")
+
+def test_deploy_errors_are_strings(monkeypatch):
+    patch_backend(monkeypatch)
+    monkeypatch.setattr(it, "replace_config", lambda params, cfg: (_ for _ in ()).throw(it.DeployError("ssh lost")))
+    assert it.deploy_config(device="leaf1").startswith("Error:")
+
+def event(name, result, inputs=None):
+    return SimpleNamespace(tool_use={"name": name, "input": inputs or {}}, cancel_message=None, exception=None,
+                           result={"status": "success", "content": [{"text": json.dumps(result)}]})
+
+def test_show_links(capsys):
+    hook = it.ShowInfrahubLinks(infrahub=None, base_url="http://localhost:8000")
+    hook.session_branch = lambda: "agent/20261022-ab12"
+    hook.show(event("node_upsert", {"id": "u1", "display_label": "GUESTS", "branch": "agent/20261022-ab12"}, {"kind": "IpamVLAN"}))
+    hook.show(event("propose_changes", {"id": "pc1", "source_branch": "agent/20261022-ab12"}))
+    hook.show(event("mutate_graphql", {"IpamVLANCreate": {"ok": True, "object": {"id": "u2"}}}))
+    hook.show(event("get_nodes", {"nodes": []}))
+    out = capsys.readouterr().out
+    assert "http://localhost:8000/objects/IpamVLAN/u1?branch=agent/20261022-ab12" in out
+    assert "http://localhost:8000/proposed-changes/pc1" in out
+    assert "u2" in out and "agent/20261022-ab12" in out and out.count("[infrahub:") == 3
+
+def test_show_links_never_raises(capsys):
+    hook = it.ShowInfrahubLinks(infrahub=None, base_url="http://x")
+    hook.show(SimpleNamespace(tool_use={"name": "node_upsert", "input": {}}, cancel_message=None, exception=None, result={"status": "error", "content": [{"text": "boom"}]}))
+    hook.show(event("mutate_graphql", "not a dict"))
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `uv run pytest tests/test_infrahub_tools.py -q`
+Expected: FAIL, module missing.
+
+- [ ] **Step 3: Implement `vlanlab/infrahub_tools.py`**
+
+Import `fetch_artifact`, `ArtifactNotReady` from `vlanlab.infrahub_api` and `load_inventory`, `running_config`, `replace_config`, `DeployError` from `vlanlab.eos` as module names (the tests monkeypatch them here). `normalize` and `config_diff` with `difflib.unified_diff(..., fromfile="running", tofile="rendered", lineterm="")`. `preview_config` docstring tells the model it is read-only and shows the diff between Infrahub's rendered config and the switch; `deploy_config` docstring says it replaces the whole running configuration with Infrahub's artifact for that device, that the user confirms on the terminal, and that it takes no configuration text. Both resolve the device from the inventory (unknown → `Error: unknown device … Known devices: …`), fetch the artifact (`ArtifactNotReady` → `Error: no ready artifact for <device> in Infrahub; …`), never raise. `deploy_config` returns `f"{device}: configuration replaced and saved. {output}"`. `ShowInfrahubLinks.show`: ignore tools not in `INFRAHUB_WRITE_TOOLS`, cancelled or error results; parse the first JSON content block; `node_upsert` → `/objects/<input kind>/<id>?branch=<branch>`; `propose_changes` → `/proposed-changes/<id>`; `mutate_graphql` → collect every `object.id` found in the response and print them with the branch from `self.session_branch()` (which calls `self.infrahub.call_tool_sync(..., "get_session_info", {})` and returns `session_branch`, `"?"` on any failure). Everything inside one `try/except Exception` that prints nothing on failure.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `uv run pytest tests/test_infrahub_tools.py -q`
+Expected: `7 passed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add vlanlab/infrahub_tools.py tests/test_infrahub_tools.py && git commit -m "feat: preview_config/deploy_config tools and Infrahub link hook"
+```
+
+---
+
+### Task 8: Guards (`vlanlab/guards.py`)
 
 **Files:**
 - Create: `vlanlab/guards.py`, `tests/test_guards.py`
 
 **Interfaces:**
-- Consumes: `device_tool.TOOL_NAME`.
-- Produces: `VLAN_RE`, `NAME_RE` (compiled); `class VlanGuard(SteeringHandler)` with `name = "vlan-guard"`, `__init__(self, max_vlans: int = 5)`, `check(self, tool_use: dict) -> str | None` (pure), `vlan_ids(commands: list[str]) -> set[int]` (static), the `start_turn` hook and `steer_before_tool` as in `strand_agents_lab`'s `LimitDeletes`; `class ConfirmDeviceWrites(HookProvider)` with `__init__(self, ask=input)`, `confirm(self, event)`, registered at `HookOrder.SDK_LAST`.
+- Consumes: `DEPLOY_TOOL`, `fetch_artifact`, `ArtifactNotReady`, `load_inventory`, `config_diff` (all imported as module names for patching).
+- Produces: `class DeployGuard(SteeringHandler)` (`name = "deploy-guard"`, `__init__(self, max_devices: int = 2)`, `check(self, tool_use: dict) -> str | None` pure given injected `rendered: str | None` through `self.render = fetch_artifact` and `self.inventory = load_inventory`, `start_turn`, `turn_calls`, `steer_before_tool`); `class ConfirmDeploy(HookProvider)` (`__init__(self, ask=input)`, `confirm(event)`, registered at `HookOrder.SDK_LAST`; prints the device and the diff from `self.preview(device)` = `preview_config`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -442,49 +586,52 @@ git add vlanlab/device_tool.py tests/test_device_tool.py && git commit -m "feat:
 from types import SimpleNamespace
 from vlanlab import guards
 
-def use(commands, device="leaf1", name="configure_vlans"):
-    return {"name": name, "input": {"device": device, "commands": commands}}
+GOOD = "hostname leaf1\n!\nusername admin privilege 15 secret admin\n!\ninterface Management0\n   ip address 172.20.20.11/24\n!\nend\n"
+INV = {"leaf1": {"host": "172.20.20.11"}, "leaf2": {"host": "172.20.20.12"}}
 
-def guard(done_ids=()):
-    g = guards.VlanGuard(max_vlans=5)
-    g.turn_calls = lambda: [{"tool_name": "configure_vlans", "status": "success", "tool_args": {"commands": [f"vlan {i}" for i in done_ids]}}]
+def guard(rendered=GOOD, done=()):
+    g = guards.DeployGuard(max_devices=2)
+    g.render = lambda device, **kw: rendered if rendered is not None else (_ for _ in ()).throw(guards.ArtifactNotReady(device))
+    g.inventory = lambda: INV
+    g.turn_calls = lambda: [{"tool_name": "deploy_config", "status": "success", "tool_args": {"device": d}} for d in done]
     return g
 
-def test_allows_vlan_and_name_after_normalisation():
-    assert guard().check(use(["VLAN 30", "  name   IOT "])) is None
+def use(device="leaf1", name="deploy_config"):
+    return {"name": name, "input": {"device": device}}
 
-def test_refuses_deletion_and_anything_else():
-    for bad in (["no vlan 99"], ["vlan 30", "shutdown"], ["interface Ethernet1"], ["vlan 0"], ["vlan 4095"], ["name has space"], ["name " + "x" * 33], []):
-        reason = guard().check(use(bad)); assert reason, bad
-    assert "not allowed" in guard().check(use(["no vlan 99"]))
+def test_allows_a_sane_rendering():
+    assert guard().check(use()) is None
+
+def test_refuses_unsafe_or_missing_renderings():
+    assert "artifact" in guard(rendered=None).check(use()).lower()
+    assert "hostname" in guard(rendered=GOOD.replace("hostname leaf1", "hostname leaf9")).check(use())
+    assert "Management0" in guard(rendered=GOOD.replace("172.20.20.11/24", "10.0.0.1/24")).check(use())
+    assert "admin" in guard(rendered=GOOD.replace("username admin privilege 15 secret admin\n", "")).check(use())
+    assert guard().check(use(device="spine1"))
+
+def test_caps_devices_per_turn():
+    assert guard(done=("leaf1",)).check(use("leaf2")) is None
+    assert guard(done=("leaf1", "leaf2")).check(use("leaf1"))          # third deploy in the turn
+    assert guard(done=("leaf1",)).check(use("leaf1")) is None           # same device again counts once
 
 def test_ignores_other_tools():
-    assert guard().check({"name": "send_show_command", "input": {"command": "no vlan 99"}}) is None
+    assert guard(rendered=None).check(use(name="preview_config")) is None
 
-def test_caps_distinct_vlans_per_turn():
-    assert guard(done_ids=(1, 2, 3)).check(use(["vlan 4", "vlan 5"])) is None
-    assert guard(done_ids=(1, 2, 3)).check(use(["vlan 4", "vlan 5", "vlan 6"]))
-    assert guard(done_ids=(1, 2, 3)).check(use(["vlan 3", "name A", "vlan 4", "vlan 5"])) is None  # 3 already counted
-
-def test_confirm_device_writes(capsys):
-    e = SimpleNamespace(tool_use=use(["vlan 30", "name IOT"]), cancel_tool=False)
-    guards.ConfirmDeviceWrites(ask=lambda p: "y").confirm(e); assert e.cancel_tool is False
-    assert "leaf1" in capsys.readouterr().out
-    e = SimpleNamespace(tool_use=use(["vlan 30"]), cancel_tool=False)
-    guards.ConfirmDeviceWrites(ask=lambda p: "").confirm(e); assert isinstance(e.cancel_tool, str)
-    e = SimpleNamespace(tool_use=use(["vlan 30"]), cancel_tool="Tool call cancelled. deletions are not allowed")
-    guards.ConfirmDeviceWrites(ask=lambda p: (_ for _ in ()).throw(AssertionError("must not ask"))).confirm(e)
+def test_confirm_deploy(capsys):
+    hook = guards.ConfirmDeploy(ask=lambda p: "y"); hook.preview = lambda d: "+vlan 40"
+    e = SimpleNamespace(tool_use=use(), cancel_tool=False); hook.confirm(e); assert e.cancel_tool is False
+    out = capsys.readouterr().out; assert "leaf1" in out and "+vlan 40" in out
+    e = SimpleNamespace(tool_use=use(), cancel_tool=False); guards.ConfirmDeploy(ask=lambda p: "n").confirm(e); assert isinstance(e.cancel_tool, str)
+    e = SimpleNamespace(tool_use=use(), cancel_tool="Tool call cancelled."); guards.ConfirmDeploy(ask=lambda p: (_ for _ in ()).throw(AssertionError())).confirm(e)
     def eof(p): raise EOFError
-    e = SimpleNamespace(tool_use=use(["vlan 30"]), cancel_tool=False)
-    guards.ConfirmDeviceWrites(ask=eof).confirm(e); assert isinstance(e.cancel_tool, str)
+    e = SimpleNamespace(tool_use=use(), cancel_tool=False); h = guards.ConfirmDeploy(ask=eof); h.preview = lambda d: ""; h.confirm(e); assert isinstance(e.cancel_tool, str)
 
 def test_hook_order_is_after_steering():
     from strands.hooks import HookOrder
     calls = []
     class Reg:
         def add_callback(self, et, cb, order=HookOrder.DEFAULT): calls.append(order)
-    guards.ConfirmDeviceWrites().register_hooks(Reg())
-    assert calls == [HookOrder.SDK_LAST]
+    guards.ConfirmDeploy().register_hooks(Reg()); assert calls == [HookOrder.SDK_LAST]
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -494,7 +641,7 @@ Expected: FAIL, module missing.
 
 - [ ] **Step 3: Implement `vlanlab/guards.py`**
 
-`VLAN_RE = re.compile(r"^vlan (\d{1,4})$")`, `NAME_RE = re.compile(r"^name [A-Za-z0-9_-]{1,32}$")`. Normalise each command with `" ".join(cmd.lower().split())` before matching `VLAN_RE`; `NAME_RE` is matched on `" ".join(cmd.split())` (names keep their case). `check`: not our tool → `None`; empty list → reason; a command matching neither → reason naming the command and saying `"… is not allowed: only 'vlan N' and 'name X' may be sent, deletions are not allowed. Report it to the user instead of retrying."`; vid outside 1..4094 → reason; then `done = vlan_ids` of the successful `configure_vlans` calls of the turn (ledger, `status == "success"`), `asked = vlan_ids(commands)`, refuse when `len(done | asked) > max_vlans` with the same wording style as `LimitDeletes`. `steer_before_tool` prints `[guard: …]` and returns `Guide(reason)`; `start_turn`/`turn_calls` copied from `LimitDeletes`. `ConfirmDeviceWrites.confirm`: return if not our tool or `event.cancel_tool`; print `"\n  CONFIGURE {device}:"` then one `"    {cmd}"` per command; `ask("  Confirm? [y/N] ")`; anything but `y`, or `EOFError`, sets `event.cancel_tool = "Configuration refused by the user. Do not retry it; tell the user it was not done."`.
+`DeployGuard.check`: not `DEPLOY_TOOL` → `None`; device not in inventory → reason; `self.render(device)` (`ArtifactNotReady` or empty → `"No ready artifact for <device> in Infrahub: nothing to deploy. Report it; do not retry."`); rendered must contain the line `hostname <device>`, a `username admin` line, and an `interface Management0` block whose next lines contain `ip address <inventory host>/`; then count distinct devices among successful `deploy_config` calls of the turn plus this one, refuse above `max_devices` with the `LimitDeletes` wording style. `steer_before_tool` prints `[guard: …]` and returns `Guide`; `start_turn`/`turn_calls` as in `strand_agents_lab`'s `LimitDeletes`; everything defensive (steering is fail-open). `ConfirmDeploy.confirm`: skip other tools and already-cancelled calls; print `"\n  DEPLOY {device}: replace the running configuration with Infrahub's rendering"` then the preview diff (indented), `ask("  Confirm? [y/N] ")`; not `y` or `EOFError` → `event.cancel_tool = "Deployment refused by the user. Do not retry it; tell the user it was not done."`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -504,18 +651,18 @@ Expected: `6 passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add vlanlab/guards.py tests/test_guards.py && git commit -m "feat: VLAN whitelist steering and device write confirmation"
+git add vlanlab/guards.py tests/test_guards.py && git commit -m "feat: DeployGuard steering and ConfirmDeploy hook"
 ```
 
 ---
 
-### Task 8: Skills
+### Task 9: Skills
 
 **Files:**
-- Create: `skills/vlan-audit/SKILL.md`, `skills/vlan-remediation/SKILL.md`, `tests/test_skills.py`
+- Create: `skills/infrahub-change/SKILL.md`, `skills/deploy-config/SKILL.md`, `skills/vlan-check/SKILL.md`, `tests/test_skills.py`
 
 **Interfaces:**
-- Produces: two skills loadable by `AgentSkills(skills=["skills"], strict=True)`; tool names used in the procedures: `netbox_get_objects`, `send_show_command`, `configure_vlans`.
+- Produces: three skills loadable by `AgentSkills(skills=["skills"], strict=True)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -524,15 +671,16 @@ git add vlanlab/guards.py tests/test_guards.py && git commit -m "feat: VLAN whit
 import pathlib, re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def frontmatter(p):
+def fm(p):
     m = re.match(r"---\n(.*?)\n---\n", p.read_text(), re.S); assert m, p
-    return dict(line.split(": ", 1) for line in m.group(1).splitlines())
+    return dict(l.split(": ", 1) for l in m.group(1).splitlines())
 
-def test_skills_have_frontmatter_and_name_their_tools():
-    audit = ROOT / "skills/vlan-audit/SKILL.md"; fix = ROOT / "skills/vlan-remediation/SKILL.md"
-    assert frontmatter(audit)["name"] == "vlan-audit" and frontmatter(fix)["name"] == "vlan-remediation"
-    assert "send_show_command" in audit.read_text() and "show vlan" in audit.read_text() and "netbox_get_objects" in audit.read_text()
-    assert "configure_vlans" in fix.read_text() and "no vlan" in fix.read_text()
+def test_skills_frontmatter_and_tools():
+    change, deploy, check = (ROOT / f"skills/{n}/SKILL.md" for n in ("infrahub-change", "deploy-config", "vlan-check"))
+    assert fm(change)["name"] == "infrahub-change" and fm(deploy)["name"] == "deploy-config" and fm(check)["name"] == "vlan-check"
+    t = change.read_text(); assert all(k in t for k in ("mutate_graphql", "get_session_info", "propose_changes", "IpamVLANCreate", "untagged_vlan"))
+    t = deploy.read_text(); assert all(k in t for k in ("preview_config", "deploy_config")) and "no difference" in t
+    t = check.read_text(); assert "send_show_command" in t and "show vlan" in t
 
 def test_agent_skills_plugin_loads_them():
     from strands import AgentSkills
@@ -544,35 +692,32 @@ def test_agent_skills_plugin_loads_them():
 Run: `uv run pytest tests/test_skills.py -q`
 Expected: FAIL, files missing.
 
-- [ ] **Step 3: Write `skills/vlan-audit/SKILL.md`**
+- [ ] **Step 3: Write the three skills**
 
-Frontmatter `name: vlan-audit`, `description:` one sentence saying when to use it (user asks to audit, compare, check VLANs of a site against the switches). Body, as numbered steps: get the site's VLANs with `netbox_get_objects` (`object_type: vlans`, `filters: {"site": "<slug>"}`); get the site's devices (`object_type: devices`, same filter) and their interfaces if asked; for each device run `send_show_command` with `command: "show vlan"` and `use_textfsm: true`; compare on `vlan_id` and `vlan_name`, ignoring VLAN 1; render one table per device with columns VLAN, expected name, observed name, verdict (`ok`, `missing`, `renamed`), then list VLANs present on the switch but absent from NetBox as `undocumented`; end with a one-line summary per device. State that this skill changes nothing.
+`infrahub-change` (use when the user asks to add, change or remove intent: VLANs, interface assignments): read the schema of the kinds involved with `get_schema` if unsure; create or change nodes with `mutate_graphql` when a relationship is involved (example mutation `IpamVLANCreate(data: {name: {value: "GUESTS"}, vlan_id: {value: 40}, status: {value: "active"}, vlan_group: {hfid: ["lab-vlans"]}}) { ok object { id } }` and `InterfacePhysicalUpdate(data: {hfid: ["leaf1", "Ethernet3"], untagged_vlan: {hfid: ["GUESTS"]}}) { ok object { id } }`, checking the HFID shapes with `get_schema`), `node_upsert` for scalar-only changes; after the first write call `get_session_info` and tell the user the branch; verify with `get_nodes` on that branch; finish with `propose_changes` (title, description) and give the user the link; never write to the default branch; stop there, the human merges.
+`deploy-config` (use when asked to deploy, apply, push, or re-align a switch): for each device, `preview_config`; if "no difference", say so and skip; else show the diff and call `deploy_config` once; report; never send configuration by any other means; after deploying, offer `vlan-check`.
+`vlan-check` (use when asked to check, verify or audit VLANs): `send_show_command` with `show vlan` and `use_textfsm: true` per device (`list_devices` first if needed); table per device; compare with Infrahub's VLANs (`get_nodes` kind `IpamVLAN`) when asked for compliance.
 
-- [ ] **Step 4: Write `skills/vlan-remediation/SKILL.md`**
-
-Frontmatter `name: vlan-remediation`, `description:` when the user asks to fix, align or remediate switches to match NetBox. Body: start from the audit in the conversation, or run `vlan-audit` first; for each device build the minimal command list: `vlan N` then `name X` for every `missing` or `renamed` VLAN; never emit `no vlan`, `shutdown`, interface or any other command, and say so when a VLAN is `undocumented`: it stays, and the user may document it in NetBox; call `configure_vlans` once per device; the user confirms on the terminal; then report, and offer to re-run the audit.
-
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 4: Run the test to verify it passes**
 
 Run: `uv run pytest tests/test_skills.py -q`
 Expected: `2 passed`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add skills tests/test_skills.py && git commit -m "feat: vlan-audit and vlan-remediation skills"
+git add skills tests/test_skills.py && git commit -m "feat: infrahub-change, deploy-config and vlan-check skills"
 ```
 
 ---
 
-### Task 9: The agent and `.mcp.json`
+### Task 10: The agent and `.mcp.json`
 
 **Files:**
 - Create: `agent.py`, `.mcp.json`, `tests/test_agent.py`
 
 **Interfaces:**
-- Consumes: Tasks 5, 6, 7, 8.
-- Produces: `uv run python agent.py` (chat), `uv run python agent.py "question"` (one shot), `uv run python agent.py --list-tools` (builds the agent, starts both MCP servers, prints one tool name per line, exits 0; used by `install.sh`). `build_agent() -> Agent`. `.mcp.json` servers `netbox` and `netmiko`.
+- Produces: `build_agent() -> Agent`; `uv run python agent.py [question]`; `uv run python agent.py --list-tools`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -581,40 +726,38 @@ git add skills tests/test_skills.py && git commit -m "feat: vlan-audit and vlan-
 import json, pathlib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def test_mcp_json_declares_both_servers_pinned():
+def test_mcp_json():
     cfg = json.loads((ROOT / ".mcp.json").read_text())["mcpServers"]
-    assert set(cfg) == {"netbox", "netmiko"}
+    assert set(cfg) == {"infrahub", "netmiko"}
+    assert "infrahub-mcp==1.2.0" in " ".join(cfg["infrahub"]["args"]) and "agent/{date}-{hex}" in " ".join(cfg["infrahub"]["args"])
     assert "netmiko-mcp==0.2.0" in " ".join(cfg["netmiko"]["args"]) and "netmiko/netmiko-mcp.yml" in " ".join(cfg["netmiko"]["args"])
-    assert "NETBOX_RW_TOKEN" in " ".join(cfg["netbox"]["args"])
 
-def test_build_agent_wires_tools_hooks_and_guards(monkeypatch):
+def test_build_agent_wiring(monkeypatch):
     import agent
-    from vlanlab import guards, netbox_hooks
     monkeypatch.setattr(agent.MCPClient, "load_servers", classmethod(lambda cls, cfg: []))
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test"); monkeypatch.setenv("INFRAHUB_ADDRESS", "http://localhost:8000")
     a = agent.build_agent()
-    assert "configure_vlans" in a.tool_names                      # Agent.tool_names, Strands 1.61.1
-    assert "vlan-guard" in a._plugin_registry._plugins            # plugins are registered by their `name`
-    assert any(isinstance(h, netbox_hooks.ConfirmNetboxWrites) for h in a.hooks._registered_providers) if hasattr(a.hooks, "_registered_providers") else True
+    assert {"preview_config", "deploy_config"} <= set(a.tool_names)
+    assert "deploy-guard" in a._plugin_registry._plugins
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `uv run pytest tests/test_agent.py -q`
-Expected: FAIL, files missing. (With `load_servers` returning `[]`, `ConfirmNetboxWrites` gets `netbox=None`: `build_agent` passes `servers[0] if servers else None`.)
+Expected: FAIL, files missing.
 
 - [ ] **Step 3: Write `.mcp.json`**
 
 ```json
 {"mcpServers": {
-  "netbox":  {"command": "sh", "args": ["-c", "set -a; . ./.env; NETBOX_TOKEN=$NETBOX_RW_TOKEN exec uv --directory netbox-mcp-rw run server.py 2>>netbox-mcp-rw/server.log"]},
-  "netmiko": {"command": "sh", "args": ["-c", "NETMIKO_MCP_CONFIG=netmiko/netmiko-mcp.yml exec uvx --from netmiko-mcp==0.2.0 netmiko-mcp"]}
+  "infrahub": {"command": "sh", "args": ["-c", "set -a; . ./.env; INFRAHUB_MCP_BRANCH_PATTERN='agent/{date}-{hex}' exec uvx infrahub-mcp==1.2.0"]},
+  "netmiko":  {"command": "sh", "args": ["-c", "NETMIKO_MCP_CONFIG=netmiko/netmiko-mcp.yml exec uvx --from netmiko-mcp==0.2.0 netmiko-mcp"]}
 }}
 ```
 
 - [ ] **Step 4: Write `agent.py`**
 
-Module docstring: what it is and the three ways to run it. `SYSTEM_PROMPT`: network inventory assistant; NetBox is the source of truth; switches are read with the netmiko tools and written only with `configure_vlans`; before any write state what will change and wait for the terminal confirmation; never send deletions; use the skills when a request matches; be concise; answer in the user's language. `build_agent()`: `servers = MCPClient.load_servers(".mcp.json")`; `AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000)`; `Agent(model, tools=[*servers, configure_vlans], system_prompt, callback_handler=chat_handler, context_manager="auto", hooks=[ConfirmNetboxWrites(servers[0] if servers else None), ShowWriteLinks(), ConfirmDeviceWrites()], plugins=[AgentSkills(skills=["skills"], strict=True), VlanGuard()])`. `chat_handler`, `chat`, `main` ported from `strand_agents_lab/netbox_agent.py`; `main` handles `--list-tools` before anything else: `print("\n".join(agent.tool_names))` (triggers MCP start) then `cleanup()`. The streamed line for a tool call reads `[tool: <name>]`.
+Docstring: what it is, the three ways to run it. `SYSTEM_PROMPT`: network automation assistant; Infrahub is the source of truth and generates the switch configurations; changes of intent go to Infrahub through its tools, always on the session branch, and end with a proposed change the human merges; switches are read with the netmiko tools and written only with `deploy_config`, which deploys Infrahub's rendering and nothing else; never send configuration lines yourself; use the skills; be concise; answer in the user's language. `build_agent()`: `servers = MCPClient.load_servers(".mcp.json")`; `infrahub = next((s for s in servers if "infrahub" in getattr(s, "name", "")), servers[0] if servers else None)` (or match by tool list later; the hook only needs `call_tool_sync`); `AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000)`; `Agent(model, tools=[*servers, preview_config, deploy_config], system_prompt, callback_handler=chat_handler, context_manager="auto", hooks=[ShowInfrahubLinks(infrahub, os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000").rstrip("/")), ConfirmDeploy()], plugins=[AgentSkills(skills=["skills"], strict=True), DeployGuard()])`. `chat_handler`, `chat`, `main` ported from `strand_agents_lab/netbox_agent.py`; `--list-tools` prints `agent.tool_names` one per line then `cleanup()`; the streamed tool line reads `[tool: <name>]`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -624,40 +767,40 @@ Expected: `2 passed`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agent.py .mcp.json tests/test_agent.py && git commit -m "feat: the agent, two MCP servers plus configure_vlans, guards and skills wired"
+git add agent.py .mcp.json tests/test_agent.py && git commit -m "feat: the agent, two MCP servers plus preview/deploy tools, guards and skills wired"
 ```
 
 ---
 
-### Task 10: `install.sh` and `uninstall.sh`
+### Task 11: `install.sh`, `uninstall.sh`, and the running-config alignment
 
 **Files:**
 - Create: `install.sh`, `uninstall.sh`, `tests/test_install_sh.py`
+- Modify: `infrahub/templates/eos_leaf.j2`, `tests/fixtures/eos_leaf/output.txt` (alignment), `vlanlab/infrahub_tools.py` `normalize` if cEOS headers need more rules
 
 **Interfaces:**
-- Consumes: everything above.
-- Produces: `sh install.sh` end to end; `sh uninstall.sh [--purge]`.
+- Produces: `sh install.sh [--check-prereqs]`; `sh uninstall.sh [--purge]`.
 
-- [ ] **Step 1: Write the failing test (static checks on the script)**
+- [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_install_sh.py
 import pathlib, re, subprocess
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def test_install_sh_is_posix_and_pins_everything():
+def test_install_sh_static():
     s = (ROOT / "install.sh").read_text()
     assert s.startswith("#!/bin/sh") and "set -e" in s
-    assert "netmiko-mcp==0.2.0" in s and "96705f8ff24b96e98f6d82e6f4fde399e5ac57d9" in s
-    assert "ceos:lab" in s and "clab/vlan-lab.clab.yml" in s
-    assert re.search(r"sudo containerlab", s) and not re.search(r"sudo uv", s)
-    assert subprocess.run(["sh", "-n", str(ROOT / "install.sh")]).returncode == 0
-    assert subprocess.run(["sh", "-n", str(ROOT / "uninstall.sh")]).returncode == 0
+    for pin in ("infrahub.opsmill.io/1.11.9", "netmiko-mcp==0.2.0", "ceos:lab", "clab/vlan-lab.clab.yml", "infrahubctl schema load", "infrahubctl object load", "repository add", "--read-only"):
+        assert pin in s, pin
+    assert re.search(r"sudo containerlab", s) and not re.search(r"sudo (uv|docker|curl)", s)
+    for f in ("install.sh", "uninstall.sh"):
+        assert subprocess.run(["sh", "-n", str(ROOT / f)]).returncode == 0
 
-def test_install_sh_stops_without_image(tmp_path):
-    # run only the prerequisite step: the script must exit 1 and name images/ when no archive is there
+def test_install_sh_reports_all_missing_prereqs():
     r = subprocess.run(["sh", str(ROOT / "install.sh"), "--check-prereqs"], cwd=ROOT, capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"})
-    assert r.returncode == 1 and "images/" in r.stdout + r.stderr
+    out = r.stdout + r.stderr
+    assert r.returncode == 1 and "images/" in out and "containerlab" in out
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -667,45 +810,47 @@ Expected: FAIL, script missing.
 
 - [ ] **Step 3: Write `install.sh`**
 
-POSIX sh, `set -e`, `cd "$(dirname "$0")"`, `step()` helper, `--check-prereqs` flag that runs step 0 only. Steps, each printed as `== N/7 …`:
-0. Prerequisites, all checked before exiting so one run reports every gap: `docker info` works without sudo (else: add the user to the `docker` group), `docker compose version`, `containerlab version` (else print `bash -c "$(curl -sL https://get.containerlab.dev)"`), `uv`, `git`; exactly one archive among `images/cEOS64-lab-*.tar*`, `images/cEOS-lab-*.tar*`, `images/cEOSarm-lab-*.tar*` (none → print the Arista download URL and the expected location; several → pick the lexically last and say so). Any gap → exit 1 after the list.
-1. `.env`: keep existing values or generate `NETBOX_SUPERUSER_TOKEN` (40 hex), `NETBOX_TOKEN`, `NETBOX_RW_TOKEN` (40 hex each), `NETBOX_SECRET_KEY` (≥ 50 chars); write `NETBOX_URL=http://localhost:$PORT/`; keep an existing `ANTHROPIC_API_KEY` line, else write it empty with a comment. `docker compose up -d`; wait for `/login/` (10 minutes max); `sh netbox/bootstrap_token.sh`.
-2. Seed: `NETBOX_URL=… NETBOX_TOKEN=$SUPERUSER MCP_TOKEN=… MCP_RW_TOKEN=… uv run python netbox/seed.py`.
-3. `netbox-mcp-rw`: clone if missing, `checkout` the pinned commit, `.python-version` 3.13, `uv --directory netbox-mcp-rw sync -q`.
-4. `netmiko-mcp`: `uv tool install --quiet netmiko-mcp==0.2.0`; write `netmiko/netmiko-mcp.yml` (`inventory_type: netmiko_tools`, `inventory_file`, `command_file`, `audit_log_file` as absolute paths under `$PWD/netmiko/`), `netmiko/.netmiko.yml` (leaf1, leaf2: `device_type: arista_eos`, hosts, `admin`/`admin`; group `leafs: [leaf1, leaf2]`), `netmiko/commands.yml` (`allowed_commands: ["show vlan*"]`, `denied_commands: []`).
-5. Containerlab: `docker image inspect ceos:lab` or `docker import "$ARCHIVE" ceos:lab`; `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure`; wait until `uv run python -c` with Netmiko gets `show vlan` from both leafs (retry every 10 s, 5 minutes max).
-6. Agent: `uv sync`; `uv run python agent.py --list-tools` must list `configure_vlans`, `send_show_command`, `netbox_get_objects`.
-7. Checks, each printed `[ok]`/`[KO]`: NetBox VLAN count on site `lab` is 3 with the read token; the read token gets 403 on a PATCH; the rw token can PATCH a VLAN name to itself; `show vlan` on each leaf contains `USERS`, `VOICE`, `IOT`. Final line: NetBox URL, admin credentials, `uv run python agent.py`, and the reminder to set `ANTHROPIC_API_KEY` in `.env` if empty.
+POSIX sh, `set -e`, `cd "$(dirname "$0")"`, `step()` helper, `--check-prereqs` runs step 0 only. Steps printed `== N/9 …`:
+0. Prerequisites, all checked before exiting: `docker info` without sudo, `docker compose version`, `containerlab version` (print the official install line), `uv`, `git`, `curl`, exactly one archive among `images/cEOS64-lab-*.tar*`, `images/cEOS-lab-*.tar*`, `images/cEOSarm-lab-*.tar*` (none → Arista download URL and location; several → lexically last, say so), RAM ≥ 16 GB (warning only). Any gap → exit 1 after the list.
+1. `.env`: keep or generate `INFRAHUB_INITIAL_ADMIN_TOKEN` (uuid), `INFRAHUB_INITIAL_AGENT_TOKEN` (uuid), `INFRAHUB_SECURITY_SECRET_KEY` (≥ 32 chars); set `INFRAHUB_API_TOKEN=$INFRAHUB_INITIAL_ADMIN_TOKEN`, `INFRAHUB_ADDRESS=http://localhost:8000`; keep or default `INFRAHUB_REPO_URL=https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand`, `INFRAHUB_REPO_REF=main`; keep `ANTHROPIC_API_KEY` or write it empty with a comment.
+2. Infrahub: `curl -sL https://infrahub.opsmill.io/1.11.9 -o infrahub/docker-compose.yml` if missing; `docker compose -p vlan-lab -f infrahub/docker-compose.yml --env-file .env up -d`; wait for `GET /api/config` (15 minutes max).
+3. Schema: `uv sync` then `uv run infrahubctl schema load infrahub/schema --wait 60`.
+4. Objects: `uv run infrahubctl object load infrahub/objects`.
+5. Repository: if `uv run infrahubctl repository list` lacks `blog-lab`, `uv run infrahubctl repository add blog-lab "$INFRAHUB_REPO_URL" --read-only --ref "$INFRAHUB_REPO_REF"`; then `uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated --timeout 600`.
+6. netmiko-mcp: `uv tool install --quiet netmiko-mcp==0.2.0`; write `netmiko/netmiko-mcp.yml` (`inventory_type: netmiko_tools`, absolute `inventory_file`, `command_file`, `audit_log_file` under `$PWD/netmiko/`), `netmiko/.netmiko.yml` (leaf1, leaf2, `arista_eos`, hosts, admin/admin, group `leafs`), `netmiko/commands.yml` (`allowed_commands: ["show vlan*", "show running-config*"]`, `denied_commands: []`).
+7. Containerlab: `docker image inspect ceos:lab` or `docker import "$ARCHIVE" ceos:lab`; `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure`; wait until `uv run python -c` with `vlanlab.eos.running_config` answers for both leafs (10 s retry, 5 minutes max).
+8. Agent: `uv run python agent.py --list-tools` must list `preview_config`, `deploy_config`, `send_show_command`, `get_nodes`, `node_upsert`.
+9. Checks `[ok]`/`[KO]`: three `IpamVLAN` on Infrahub; two artifacts Ready; `show vlan` on each leaf contains `USERS`, `VOICE`, `IOT`; `preview_config` returns "no difference" for both leafs. Final summary: Infrahub URL and admin credentials, `uv run python agent.py`, reminder for `ANTHROPIC_API_KEY`.
 
 - [ ] **Step 4: Write `uninstall.sh`**
 
-`sudo containerlab destroy -t clab/vlan-lab.clab.yml --cleanup` (ignore failure if not deployed), `docker compose down` (`--purge` adds `-v`), keep images and `.env`; print what was kept.
+`sudo containerlab destroy -t clab/vlan-lab.clab.yml --cleanup` (ignore failure), `docker compose -p vlan-lab -f infrahub/docker-compose.yml down` (`--purge` adds `-v`), keep images, `.env`, `clab/generated`; print what was kept.
 
-- [ ] **Step 5: Run the static test**
+- [ ] **Step 5: Run the static tests**
 
 Run: `uv run pytest tests/test_install_sh.py -q`
 Expected: `2 passed`.
 
-- [ ] **Step 6: Run the real thing in the dev VM, twice**
+- [ ] **Step 6: Run the real thing in the dev VM, then align the template with the running-config**
 
-Run: `sh uninstall.sh --purge; sh install.sh && sh install.sh`
-Expected: first run ends with all `[ok]` and the summary; second run creates nothing new (tokens kept, seed silent, `--reconfigure` redeploys) and ends `[ok]` again. Record the elapsed time of the first run and the cEOS boot wait for the README.
+Run: `sh uninstall.sh --purge; sh install.sh`
+Expected: steps 0 to 8 `ok`. If check 9 "no difference" fails: `docker exec clab-vlan-lab-leaf1 Cli -c "show running-config" > /tmp/running.txt`, compare with `clab/generated/leaf1.cfg` through `vlanlab.infrahub_tools.config_diff`, and for every line cEOS adds by default either add it to the template (so Infrahub's intent includes it) or, for pure cosmetics (`! Command:` headers, `! device:` lines, `! boot system`), extend `normalize`. Re-run `uv run pytest tests/test_transforms.yml` after each template change (fixture `output.txt` updated), push the template to GitHub, `sh scripts/reimport.sh`, `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure`, until `preview_config` reports "no difference" for both leafs. Then run `sh install.sh` a second time: nothing recreated, all `[ok]`. Record first-run duration and cEOS boot time.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add install.sh uninstall.sh tests/test_install_sh.py && git commit -m "feat: one-shot install.sh and uninstall.sh"
+git add install.sh uninstall.sh tests/test_install_sh.py infrahub/templates tests/fixtures vlanlab/infrahub_tools.py && git commit -m "feat: one-shot install.sh/uninstall.sh; template aligned with cEOS running-config"
 ```
 
 ---
 
-### Task 11: `drift.sh`
+### Task 12: `drift.sh`
 
 **Files:**
 - Create: `drift.sh`, `tests/test_drift_sh.py`
 
 **Interfaces:**
-- Produces: `sh drift.sh` introduces the three drifts and prints `show vlan` of both leafs; `sh drift.sh --reset` redeploys the clean config from `clab/ceos.cfg` and waits for SSH.
+- Produces: `sh drift.sh` renames VLAN 20 to `VOIP` and adds VLAN 99 `LEGACY` on leaf2, prints `show vlan` of both leafs; `sh drift.sh --reset` redeploys Containerlab from `clab/generated` and waits for SSH.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -714,12 +859,11 @@ git add install.sh uninstall.sh tests/test_install_sh.py && git commit -m "feat:
 import pathlib, subprocess
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-def test_drift_sh_encodes_the_three_drifts():
+def test_drift_sh_encodes_the_drift():
     s = (ROOT / "drift.sh").read_text()
     assert subprocess.run(["sh", "-n", str(ROOT / "drift.sh")]).returncode == 0
-    assert "clab-vlan-lab-leaf1" in s and "no vlan 30" in s
     assert "clab-vlan-lab-leaf2" in s and "name VOIP" in s and "vlan 99" in s and "name LEGACY" in s
-    assert "--reconfigure" in s and "--reset" in s
+    assert "--reset" in s and "--reconfigure" in s
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -729,7 +873,7 @@ Expected: FAIL, script missing.
 
 - [ ] **Step 3: Write `drift.sh`**
 
-POSIX sh. A `cli()` helper: `docker exec "clab-vlan-lab-$1" Cli -p 15 -c "$2"` where `$2` is a multi-line string starting with `configure` and ending with `end` followed by `write`. Default mode: leaf1 `no vlan 30`; leaf2 `vlan 20` / `name VOIP`, `vlan 99` / `name LEGACY`; then `show vlan` on both, printed under a `== leafN` header. `--reset`: `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure`, then the same SSH wait loop as `install.sh` step 5 (factor it into `scripts/wait_for_leafs.py` if you prefer; both scripts call it), then `show vlan` on both. Idempotent: EOS accepts `no vlan 30` when absent and `vlan 99` when present.
+`cli()` helper: `docker exec "clab-vlan-lab-$1" Cli -p 15 -c "$2"` with a multi-line `configure … end` + `write`. Default: leaf2 `vlan 20` / `name VOIP`, `vlan 99` / `name LEGACY`; then `show vlan` on both leafs under `== leafN` headers. `--reset`: `sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure` then the SSH wait of `install.sh` step 7 (factor it into `scripts/wait_leafs.py`, called by both scripts), then `show vlan` on both.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -738,48 +882,43 @@ Expected: `1 passed`.
 
 - [ ] **Step 5: Verify in the dev VM**
 
-Run: `sh drift.sh && sh drift.sh && sh drift.sh --reset`
-Expected: after the first two runs, leaf1 shows no VLAN 30 and leaf2 shows `20 VOIP` and `99 LEGACY`; after `--reset`, both leafs show the clean three VLANs.
+Run: `sh drift.sh && sh drift.sh && uv run python -c "from vlanlab.infrahub_tools import preview_config; print(preview_config(device='leaf2'))" && sh drift.sh --reset`
+Expected: leaf2 shows `20 VOIP` and `99 LEGACY`; the preview shows `-   name VOIP`, `+   name VOICE`, `-vlan 99`; after `--reset` leaf2 is clean again.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add drift.sh tests/test_drift_sh.py && git commit -m "feat: drift.sh introduces the three VLAN drifts and resets the lab"
+git add drift.sh scripts/wait_leafs.py tests/test_drift_sh.py && git commit -m "feat: drift.sh introduces a manual change on leaf2 and resets the lab"
 ```
 
 ---
 
-### Task 12: End-to-end run, README and macOS dev runbook
+### Task 13: End-to-end demo, README, macOS dev runbook, push
 
 **Files:**
-- Create: `README.md`, `docs/dev-macos.md`
-- Modify: `.env.example` (cost line), `docs/dev-macos.md` with the observed ARM limits
+- Create: `README.md`, `docs/dev-macos.md`, `docs/demo-transcript.txt`
+- Modify: `.env.example` (cost comment)
 
-**Interfaces:**
-- Consumes: the whole stack, in the dev VM, with a real `ANTHROPIC_API_KEY`.
+- [ ] **Step 1: Run the three acts in the dev VM with a real `ANTHROPIC_API_KEY`, keep the transcript**
 
-- [ ] **Step 1: Run the demo end to end and keep the transcript**
+`uv run python agent.py`, then: `Add VLAN 40 GUESTS to site lab and put Ethernet3 of both leafs on it.` → expect `[infrahub: …]` lines with the branch and the Proposed Change link; merge it in the UI; wait for artifacts (`uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated`, or trigger `POST /api/artifact/generate/<def id>` if they do not refresh within 2 minutes, and note it). Then `Deploy the configuration of the leafs.` → expect two previews with `+vlan 40`, two `DEPLOY` prompts, success reports. Then `Check the VLANs on both leafs.` → tables with VLAN 40. Then `sh drift.sh`, `Is leaf2 still compliant?` → diff; `Fix it.` → one deploy. Save the terminal output to `docs/demo-transcript.txt`; note tokens and cost from the Anthropic console.
 
-Run, in the VM: `sh drift.sh`, then `uv run python agent.py` and ask `Audit the VLANs of site lab against the switches.` then `Fix leaf1 and leaf2 so they match NetBox.` (answer `y` to both confirmations), then the audit again. Save the terminal output to `docs/demo-transcript.txt`.
-Expected: audit table shows leaf1 `30 missing`, leaf2 `20 renamed`, `99 undocumented`; remediation shows `[guard: …]` only if the model tried a forbidden command, two `CONFIGURE` prompts, and a final sentence saying VLAN 99 was left in place; second audit shows only `99 undocumented`. Note the Anthropic usage (tokens and cost) of the session from the console.
+- [ ] **Step 2: Try the forbidden paths on purpose**
 
-- [ ] **Step 2: Try the forbidden path on purpose**
-
-Ask: `Remove VLAN 99 from leaf2.`
-Expected: a `[guard: …]` line, no `CONFIGURE` prompt, the agent explains it cannot delete and suggests documenting the VLAN in NetBox. If the model instead calls a NetBox write, the `ConfirmNetboxWrites` prompt appears; answer `n`.
+`Remove VLAN 99 from leaf2 by sending "no vlan 99".` → the agent must refuse to send lines and propose `deploy_config` instead (system prompt + skill). Break the rendering on purpose (temporarily point `INFRAHUB_ADDRESS` to a wrong port, or rename `leaf1` to `leaf9` on a branch and deploy from it): `[guard: …]` appears, no `DEPLOY` prompt.
 
 - [ ] **Step 3: Write `README.md`**
 
-Sections, in this order: what this is (two sentences and the link to the article placeholder); the scenario (the drift table from the spec); prerequisites (Linux x86_64 Ubuntu 22.04/24.04, Docker + Compose v2 without sudo, Containerlab, uv, git, an Arista account to download `cEOS64-lab-<version>.tar.xz` into `images/`, `ANTHROPIC_API_KEY`); install (`git clone …`, put the archive, `sh install.sh`, the measured durations); run the demo (`sh drift.sh`, the two questions, `sh drift.sh --reset`); how it works (one paragraph per file: `agent.py`, `vlanlab/device_tool.py`, `vlanlab/guards.py`, `vlanlab/netbox_hooks.py`, `skills/`); "Why netmiko-mcp for reads and a custom tool for writes" (netmiko-mcp is the official server by the Netmiko author, read-only by design with a server-side command whitelist; it has no config mode, so writes go through `configure_vlans`, where the agent's own guards apply); the server-side whitelist (`netmiko/commands.yml`); cost of a demo session (measured in Step 1); tested-on statement (arm64 under OrbStack with the cEOS ARM build; x86_64 is the documented target and has not been run by the author yet); cleanup (`sh uninstall.sh [--purge]`); licence.
+Order: what this is (two sentences, article link placeholder); the loop intent → review → render → deploy → verify; prerequisites (Linux x86_64 Ubuntu 22.04/24.04, 16 GB RAM, Docker + Compose v2 without sudo, Containerlab, uv, git, curl, an Arista account for `cEOS64-lab-<version>.tar.xz` into `images/`, `ANTHROPIC_API_KEY`); install (`git clone`, archive, `sh install.sh`, measured durations); the demo (the questions of Step 1, `drift.sh`, `--reset`); how it works, one paragraph per file in reading order (`.infrahub.yml` + query + template, `infrahub/objects`, `agent.py`, `vlanlab/infrahub_tools.py`, `vlanlab/guards.py`, `vlanlab/eos.py`, `skills/`); why Infrahub writes go through branches and a Proposed Change; why `netmiko-mcp` for reads (official, read-only, server-side whitelist in `netmiko/commands.yml`) and a custom tool for writes (no config mode in netmiko-mcp; the tool deploys Infrahub's rendering only); forking (`INFRAHUB_REPO_URL`, and that a read-only repository needs `sh scripts/reimport.sh` after a push); cost of a demo session; tested-on statement (arm64 under OrbStack with the cEOS ARM build; x86_64 is the documented target and has not been run by the author yet); cleanup; licence and attribution (schema-library Apache-2.0 copies).
 
 - [ ] **Step 4: Write `docs/dev-macos.md`**
 
-Create the OrbStack Linux arm64 VM (Ubuntu), install Docker, Containerlab, uv, git inside it; clone the repo in the VM; put `cEOSarm-lab-*.tar.xz` in `images/`; run `install.sh`; reach NetBox from macOS through the VM's address; the limits of the ARM image met during Task 10 to 12 (whatever they were: boot time, missing features, error messages), each with the workaround used.
+OrbStack Linux arm64 VM (16 GB, 6 CPUs), install Docker, Containerlab, uv, git; clone the repo in the VM; `cEOSarm-lab-*.tar.xz` in `images/`; `install.sh`; reach Infrahub from macOS through the VM address; the dev loop (edit template → `uv run pytest tests/test_transforms.yml` → push to a dev branch → `INFRAHUB_REPO_REF=<branch>` → `sh scripts/reimport.sh` → `sudo containerlab deploy --reconfigure`); every ARM-image limit met in Tasks 5 to 13 with its workaround.
 
-- [ ] **Step 5: Run the whole test suite and the static checks once more**
+- [ ] **Step 5: Full test suite and trace check**
 
-Run: `uv run pytest -q && sh -n install.sh && sh -n drift.sh && sh -n uninstall.sh && grep -rIl --exclude-dir=.git --exclude-dir=.venv --exclude-dir=netbox-mcp-rw -e c9500 -e NGW -e "poc" -e 5trandagent5lab -e Europe/Paris . || true`
-Expected: all tests pass; the grep prints nothing (if it prints this plan or the spec, that is fine: only `docs/superpowers/` may mention the old lab).
+Run: `uv run pytest -q && sh -n install.sh && sh -n drift.sh && sh -n uninstall.sh && sh -n scripts/reimport.sh && grep -rIl --exclude-dir=.git --exclude-dir=.venv --exclude-dir=docs -e c9500 -e NGW -e 5trandagent5lab -e Europe/Paris -e netbox . || true`
+Expected: all tests pass; the grep prints nothing.
 
 - [ ] **Step 6: Commit and push**
 
