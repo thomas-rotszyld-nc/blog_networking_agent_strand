@@ -102,12 +102,16 @@ Git raccordé (requête GraphQL + template Jinja2 + définition d'artifact), bra
 - **Dépôt Git raccordé** : le repo compagnon lui-même, `https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand`,
   branche par défaut `main`, enregistré dans Infrahub en lecture seule (`infrahubctl repository add --read-only
   --ref main`), URL et ref surchargeables par `INFRAHUB_REPO_URL` / `INFRAHUB_REPO_REF` pour un fork ou une branche
-  de développement. **Deux comportements d'Infrahub avec un dépôt en lecture seule ne sont pas vérifiés dans les
-  sources** et conditionnent l'acte 1 et la boucle de développement : (1) la Proposed Change d'une branche de données
-  créée par le MCP montre bien le diff des artifacts ; (2) un push sur la branche pointée par `--ref` est repris par
-  Infrahub (sync périodique) et re-rend les artifacts. Le plan commence par un spike qui les prouve dans la VM, avant
-  tout template. Si (1) ou (2) est faux, repli sur un `CoreRepository` avec des identifiants GitHub, et le README
-  change. `.infrahub.yml` déclare une requête GraphQL, une
+  de développement. Un dépôt en lecture seule **ne suit pas les pushs** (règle du plugin `infrahub-skills`,
+  vérifiée) : il importe à la création puis seulement sur demande, par la mutation
+  `InfrahubReadOnlyRepositoryImportLastCommit(data: {id})`. Le repo porte donc un `scripts/reimport.sh` qui l'appelle,
+  et la boucle de développement est : push, reimport, attendre le re-rendu. **Un comportement reste à prouver** : la
+  Proposed Change d'une branche de données créée par le MCP montre bien le diff des artifacts avec un dépôt en lecture
+  seule. Le plan commence par un spike qui le vérifie dans la VM, avant tout template ; si c'est faux, repli sur un
+  `CoreRepository` avec des identifiants GitHub, et le README change. Autres règles du plugin reprises : l'ordre
+  d'installation est schéma, données, puis dépôt ; les fichiers d'objets ne déclarent jamais le dépôt lui-même ; la
+  cible d'artifact doit hériter de `CoreArtifactTarget`, ce que `DcimDevice` fait déjà au commit épinglé ;
+  l'appartenance au groupe se déclare côté membre (`member_of_groups`), le groupe étant créé avant. `.infrahub.yml` déclare une requête GraphQL, une
   transformation Jinja2 et une définition d'artifact ciblant le groupe `leafs`, paramètre `device: name__value`.
   Conséquence de développement : un changement de template ou de requête doit être poussé sur GitHub pour être rendu
   par Infrahub ; `infrahubctl render` permet de tester le rendu en local contre l'Infrahub qui tourne.
@@ -115,7 +119,11 @@ Git raccordé (requête GraphQL + template Jinja2 + définition d'artifact), bra
   `GET /api/artifact/<id>` avec le token, ou par la voie du SDK (`node.artifact_fetch(name)`, qui lit
   `/api/storage/object/<storage_id>`). Rendu à l'import du dépôt, puis à chaque changement de données ou de
   template ; la Proposed Change montre le diff des artifacts. Si le rendu après fusion tarde, le builder peut le
-  déclencher par `POST /api/artifact/generate/<definition id>`.
+  déclencher par `POST /api/artifact/generate/<definition id>`, qui ne fait que mettre en file : toute attente
+  d'artifact interroge `CoreArtifact` jusqu'à `status == Ready` et `storage_id` présent, avec un délai maximal. Dans le
+  template Jinja2, `data` est la réponse GraphQL brute, chaque attribut se lit `.value` ; seul un sous-ensemble de
+  filtres Jinja2 est autorisé. Le template est testé hors ligne par le cadre de tests du SDK (`tests/test_transforms.yml`,
+  `jinja2-transform-unit-render`, fixtures `input.json` / `output.txt`, lancé par `pytest`).
 - **`netmiko-mcp`** 0.2.0 (PyPI), lecture seule, liste blanche `show vlan*` et `show running-config*`, inventaire
   `.netmiko.yml` partagé avec les outils maison, journal d'audit dans le repo (`audit_log_file`). Au-delà de
   `save_threshold` (1000 lignes) la sortie part dans un fichier au lieu de revenir au modèle ; le `show running-config`
@@ -244,6 +252,8 @@ infrahub/objects/*.yml                              site, groupe de VLANs, VLANs
 infrahub/queries/leaf_config.gql                    la requête de la transformation
 infrahub/templates/eos_leaf.j2                      le template de configuration d'un leaf
 clab/vlan-lab.clab.yml  clab/generated/             la topologie ; les startup-configs téléchargées (git-ignorées)
+scripts/reimport.sh                                 fait avancer le dépôt en lecture seule après un push
+tests/test_transforms.yml  tests/fixtures/           tests hors ligne du template (cadre de tests du SDK) et pytest
 netmiko/                                            généré par install.sh (git-ignoré)
 images/                                             l'archive cEOS posée par le lecteur (git-ignoré)
 agent.py                                            l'agent : modèle, MCP, skills, outils maison, hooks, steering, chat
@@ -283,7 +293,8 @@ deviennent trop petits pour mériter d'exister.
   recommandée), le nom de branche de session, la forme exacte du diff.
 - Le détail du template et de la requête ; le nom du champ d'adresse de management dans le schéma (`primary_address`
   ou l'adresse de `Management0`) ; la forme des fichiers d'objets pour les relations vers un generic.
-- La façon d'attendre l'import du dépôt et le rendu des artifacts, et si le rendu après fusion doit être déclenché.
+- La façon d'attendre l'import du dépôt et le rendu des artifacts (toujours en interrogeant `CoreArtifact` jusqu'à
+  `Ready`), et si le rendu après fusion doit être déclenché.
 - La mécanique exacte du remplacement de configuration sur cEOS (session + commit, ou transfert + replace).
 - Le texte des skills et du system prompt, en partant de ceux de `strand_agents_lab`.
 - Le journal (`[infrahub: ...]`, `[tool: ...]`, `[guard: ...]`) : même esprit que l'agent existant.
