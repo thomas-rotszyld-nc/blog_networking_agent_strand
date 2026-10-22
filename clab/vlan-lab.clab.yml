@@ -1,0 +1,20 @@
+# Two Arista cEOS leafs. Their startup-configs are the artifacts Infrahub rendered, downloaded by install.sh into
+# clab/generated/ (scripts/wait_artifacts.py). Management addresses match the IpamIPAddress objects of Infrahub.
+#   sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure
+name: vlan-lab
+
+topology:
+  kinds:
+    arista_ceos:
+      image: ceos:lab
+  nodes:
+    leaf1:
+      kind: arista_ceos
+      mgmt-ipv4: 172.20.20.11
+      startup-config: generated/leaf1.cfg
+    leaf2:
+      kind: arista_ceos
+      mgmt-ipv4: 172.20.20.12
+      startup-config: generated/leaf2.cfg
+  links:
+    - endpoints: ["leaf1:eth1", "leaf2:eth1"]
