@@ -15,6 +15,9 @@ def test_mcp_json():
     assert "INFRAHUB_MCP_LOG_LEVEL=warning" in infrahub   # its info/debug logs otherwise flood the terminal
     netmiko = " ".join(cfg["netmiko"]["args"])
     assert "netmiko-mcp==0.2.0" in netmiko and "netmiko/netmiko-mcp.yml" in netmiko
+    # both servers write banners, SSH chatter and validation warnings on stderr, which would land in the chat terminal
+    assert "2>>logs/infrahub-mcp.log" in infrahub and "2>>logs/netmiko-mcp.log" in netmiko
+    assert (ROOT / "logs" / ".gitkeep").exists() and "logs/*" in (ROOT / ".gitignore").read_text()
 
 
 def test_build_agent_wiring(monkeypatch):
@@ -48,9 +51,10 @@ def test_usage_line_sums_the_tokens_of_a_result():
     import agent
 
     class Metrics:
-        accumulated_usage = {"inputTokens": 1200, "outputTokens": 340, "cacheReadInputTokens": 900, "cacheWriteInputTokens": 0}
+        accumulated_usage = {"inputTokens": 1200, "outputTokens": 340, "cacheReadInputTokens": 900, "cacheWriteInputTokens": 300}
 
     class Result:
         metrics = Metrics()
 
-    assert agent.usage_line(Result()) == "[usage: 1200 input tokens (900 read from cache), 340 output tokens]"
+    # Anthropic counts the three input kinds separately: uncached, read from the cache, written to the cache
+    assert agent.usage_line(Result()) == "[usage: input tokens 1200 uncached + 900 cache read + 300 cache write, output tokens 340]"

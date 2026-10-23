@@ -17,6 +17,8 @@ images/*
 clab/generated/*
 !clab/generated/.gitkeep
 clab/clab-vlan-lab/
+logs/*
+!logs/.gitkeep
 
 # Plan execution scratch
 .superpowers/

@@ -101,10 +101,11 @@ def chat(agent: Agent) -> None:
 
 
 def usage_line(result) -> str:
-    """Token count of a run, for the cost section of the README: input (with the part read from the cache) and output."""
-    usage = result.metrics.accumulated_usage
-    return (f"[usage: {usage.get('inputTokens', 0)} input tokens ({usage.get('cacheReadInputTokens', 0)} read from cache), "
-            f"{usage.get('outputTokens', 0)} output tokens]")
+    """Token count of a run, for the cost section of the README. Anthropic bills the three kinds of input tokens
+    differently: uncached, read from the cache, written to the cache."""
+    u = result.metrics.accumulated_usage
+    return (f"[usage: input tokens {u.get('inputTokens', 0)} uncached + {u.get('cacheReadInputTokens', 0)} cache read"
+            f" + {u.get('cacheWriteInputTokens', 0)} cache write, output tokens {u.get('outputTokens', 0)}]")
 
 
 def main() -> None:
