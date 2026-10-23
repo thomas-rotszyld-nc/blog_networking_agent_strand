@@ -12,6 +12,8 @@ import difflib
 import json
 import re
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from strands import tool
 from strands.hooks import AfterToolCallEvent, HookProvider, HookRegistry
@@ -21,6 +23,7 @@ from vlanlab.infrahub_api import ArtifactNotReady, fetch_artifact, generate_arti
 
 PREVIEW_TOOL = "preview_config"
 DEPLOY_TOOL = "deploy_config"
+DEPLOY_LOG_DIR = Path("netmiko")   # the EOS session echo of each deployment, next to the inventory (not committed)
 INFRAHUB_WRITE_TOOLS = ("node_upsert", "mutate_graphql", "propose_changes")
 SECRET_RE = re.compile(r"^(\s*username \S+ .*?secret) .*$")
 
@@ -137,7 +140,18 @@ def deploy_config(device: str) -> str:
         return f"Error: deployment to {device!r} failed: {exc}"
     except Exception as exc:
         return f"Error: deployment to {device!r} failed unexpectedly: {exc}"
-    return f"{device}: configuration replaced and saved.\n{output}"
+    log = _deploy_log(device, output)
+    answer = output.strip().splitlines()[-1] if output.strip() else ""
+    return (f"{device}: configuration replaced and saved ({len(normalize(rendered))} lines pushed in one EOS session).\n"
+            f"{answer}\nSession log: {log}")
+
+
+def _deploy_log(device: str, output: str) -> Path:
+    """Writes the raw session echo to netmiko/deploy-<device>.log (overwritten each time); returns the path."""
+    DEPLOY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = DEPLOY_LOG_DIR / f"deploy-{device}.log"
+    path.write_text(f"# {datetime.now(timezone.utc).isoformat(timespec='seconds')} deploy_config({device})\n{output}\n")
+    return path
 
 
 # --- the hook ---------------------------------------------------------------------------------------------------------

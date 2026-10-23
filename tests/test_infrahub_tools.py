@@ -112,3 +112,15 @@ def test_render_configs_tool_reports_per_device(monkeypatch):
     monkeypatch.setattr(it, "render_artifacts", lambda devices, **kw: (_ for _ in ()).throw(TimeoutError("slow")))
     assert it.render_configs().startswith("Error:")
     assert it.render_configs.tool_name == "render_configs"
+
+
+def test_deploy_result_is_a_summary_and_the_session_log_goes_to_a_file(monkeypatch, tmp_path):
+    # live run: the EOS session echoes every line with its prompt (60+ lines) — that is for a log file, not for the model
+    patch_backend(monkeypatch, rendered=RENDERED + "vlan 40\n   name GUESTS\n")
+    echo = "\n".join(f"leaf1(config-s-infrahub-d)#{line}" for line in RENDERED.splitlines()) + "\ncommit\ncopy running-config startup-config\nswitch answers after commit: Hostname: leaf1"
+    monkeypatch.setattr(it, "replace_config", lambda params, cfg: echo)
+    monkeypatch.setattr(it, "DEPLOY_LOG_DIR", tmp_path)
+    out = it.deploy_config(device="leaf1")
+    assert out.startswith("leaf1: configuration replaced and saved") and out.count("\n") <= 3 and "config-s" not in out
+    log = tmp_path / "deploy-leaf1.log"
+    assert log.exists() and "config-s-infrahub-d" in log.read_text() and str(log) in out
