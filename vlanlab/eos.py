@@ -6,6 +6,8 @@ the rendered configuration is pasted, `commit` applies it atomically, then `writ
 to send: the configuration always comes from Infrahub (see vlanlab/infrahub_tools.py).
 """
 
+import secrets
+from datetime import datetime
 from pathlib import Path
 
 from netmiko import ConnectHandler
@@ -37,7 +39,10 @@ def _config_lines(config: str) -> list[str]:
     return [line for line in lines if line.strip() and not line.startswith("!") and line.strip() != "end"]
 
 
-SESSION = "configure session infrahub-deploy"
+def session_command() -> str:
+    """`configure session <name>` with a name no deployment used before: EOS keeps a committed session as "completed"
+    and refuses to enter a session of that name again (`% Cannot enter session ... (already completed)`)."""
+    return f"configure session infrahub-{datetime.now():%Y%m%d%H%M%S}-{secrets.token_hex(2)}"
 
 
 def replace_config(params: dict, config: str) -> str:
@@ -50,7 +55,7 @@ def replace_config(params: dict, config: str) -> str:
     host = params.get("host", "?")
     try:
         with connect(**params) as conn:
-            output = conn.send_config_set(["rollback clean-config", *_config_lines(config)], config_mode_command=SESSION,
+            output = conn.send_config_set(["rollback clean-config", *_config_lines(config)], config_mode_command=session_command(),
                                           exit_config_mode=False, cmd_verify=False, read_timeout=120)
             rejected = [line.strip() for line in output.splitlines() if line.lstrip().startswith("%")]
             if rejected:

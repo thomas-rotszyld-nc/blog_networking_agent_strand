@@ -124,3 +124,19 @@ def test_deploy_result_is_a_summary_and_the_session_log_goes_to_a_file(monkeypat
     assert out.startswith("leaf1: configuration replaced and saved") and out.count("\n") <= 3 and "config-s" not in out
     log = tmp_path / "deploy-leaf1.log"
     assert log.exists() and "config-s-infrahub-d" in log.read_text() and str(log) in out
+
+
+def test_deploy_keeps_a_netmiko_session_log_even_when_the_deployment_fails(monkeypatch, tmp_path):
+    # live run: the failed deployment left no log at all, so the cause (a refused EOS session) was invisible
+    patch_backend(monkeypatch, rendered=RENDERED + "vlan 40\n   name GUESTS\n")
+    seen = {}
+
+    def failing_replace(params, cfg):
+        seen.update(params)
+        raise it.DeployError("172.20.20.11: Pattern not detected")
+
+    monkeypatch.setattr(it, "replace_config", failing_replace)
+    monkeypatch.setattr(it, "DEPLOY_LOG_DIR", tmp_path)
+    out = it.deploy_config(device="leaf1")
+    assert seen["session_log"] == str(tmp_path / "session-leaf1.log") and seen.get("session_log_file_mode") == "write"
+    assert out.startswith("Error: deployment to 'leaf1' failed") and str(tmp_path / "session-leaf1.log") in out

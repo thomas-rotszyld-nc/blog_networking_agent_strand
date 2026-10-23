@@ -135,11 +135,13 @@ def deploy_config(device: str) -> str:
     if error:
         return error
     try:
-        output = replace_config(params, rendered)
+        DEPLOY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        session_log = DEPLOY_LOG_DIR / f"session-{device}.log"   # Netmiko writes the whole SSH session there, failures included
+        output = replace_config(dict(params, session_log=str(session_log), session_log_file_mode="write"), rendered)
     except DeployError as exc:
-        return f"Error: deployment to {device!r} failed: {exc}"
+        return f"Error: deployment to {device!r} failed: {exc}\nSession log: {session_log}"
     except Exception as exc:
-        return f"Error: deployment to {device!r} failed unexpectedly: {exc}"
+        return f"Error: deployment to {device!r} failed unexpectedly: {exc}\nSession log: {session_log}"
     log = _deploy_log(device, output)
     answer = output.strip().splitlines()[-1] if output.strip() else ""
     return (f"{device}: configuration replaced and saved ({len(normalize(rendered))} lines pushed in one EOS session).\n"

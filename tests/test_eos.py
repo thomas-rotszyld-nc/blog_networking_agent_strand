@@ -58,7 +58,19 @@ def test_running_config_and_replace(monkeypatch):
     out = eos.replace_config({"host": "x"}, "hostname leaf1\nvlan 40\n   name GUESTS\nend\n")
     assert "vlan 40" in FakeConn.sent and FakeConn.saved == 1 and isinstance(out, str)
     assert "end" not in FakeConn.sent and FakeConn.sent[0] == "rollback clean-config" and FakeConn.sent[-1] == "commit"
-    assert FakeConn.config_mode_commands == ["configure session infrahub-deploy"]
+    assert len(FakeConn.config_mode_commands) == 1 and FakeConn.config_mode_commands[0].startswith("configure session infrahub-")
+
+
+def test_each_deployment_opens_a_session_with_a_new_name(monkeypatch):
+    # live run: EOS keeps a committed session as "completed" and answers `% Cannot enter session infrahub-deploy
+    # (already completed)` to the next deployment on the same switch, which then fails on a prompt timeout
+    FakeConn.sent, FakeConn.saved, FakeConn.config_mode_commands = [], 0, []
+    monkeypatch.setattr(eos, "connect", FakeConn)
+    eos.replace_config({"host": "x"}, "hostname leaf1\nend\n")
+    eos.replace_config({"host": "x"}, "hostname leaf1\nend\n")
+    first, second = FakeConn.config_mode_commands
+    assert first != second and all(c.startswith("configure session infrahub-") for c in (first, second))
+    assert all(len(c.split()[-1]) <= 32 for c in (first, second))   # EOS session names are short identifiers
 
 
 def test_rejected_line_aborts_the_session_without_commit(monkeypatch):

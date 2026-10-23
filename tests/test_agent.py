@@ -12,6 +12,7 @@ def test_mcp_json():
     # infrahub-mcp 1.2.0 runs through scripts/infrahub_mcp_stdio.py: one session branch for the process (opsmill/infrahub-mcp#187)
     assert "infrahub-mcp==1.2.0" in infrahub and "agent/{date}-{hex}" in infrahub
     assert "python scripts/infrahub_mcp_stdio.py" in infrahub
+    assert "INFRAHUB_MCP_LOG_LEVEL=warning" in infrahub   # its info/debug logs otherwise flood the terminal
     netmiko = " ".join(cfg["netmiko"]["args"])
     assert "netmiko-mcp==0.2.0" in netmiko and "netmiko/netmiko-mcp.yml" in netmiko
 
@@ -25,6 +26,8 @@ def test_build_agent_wiring(monkeypatch):
     a = agent.build_agent()
     assert {"preview_config", "deploy_config"} <= set(a.tool_names)
     assert "deploy-guard" in a._plugin_registry._plugins
+    cache = a.model.config.get("cache_config")   # ~90k input tokens per turn without it, mostly the same prefix
+    assert cache is not None and cache.system_prompt_ttl and cache.tools_ttl
 
 
 def test_load_dotenv_never_overrides_the_shell(monkeypatch, tmp_path):

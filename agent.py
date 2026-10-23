@@ -24,6 +24,7 @@ from pathlib import Path
 
 from strands import Agent, AgentSkills
 from strands.models.anthropic import AnthropicModel
+from strands.models.model import CacheConfig
 from strands.tools.mcp import MCPClient
 
 from vlanlab.guards import ConfirmDeploy, DeployGuard
@@ -72,7 +73,8 @@ def build_agent() -> Agent:
     servers = MCPClient.load_servers(".mcp.json")
     infrahub = servers[0] if servers else None  # .mcp.json lists infrahub first; the hook only needs call_tool_sync
     base_url = os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000")
-    model = AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000)  # ANTHROPIC_API_KEY from the environment
+    model = AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000,  # ANTHROPIC_API_KEY from the environment
+                           cache_config=CacheConfig(ttl="5m", system_prompt_ttl=True, tools_ttl=True))  # the prefix is the same every turn
     return Agent(model=model, tools=[*servers, render_configs, preview_config, deploy_config], system_prompt=SYSTEM_PROMPT,
                  callback_handler=chat_handler, context_manager="auto",
                  hooks=[ShowInfrahubLinks(infrahub, base_url), ConfirmDeploy()],
