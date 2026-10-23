@@ -138,5 +138,33 @@ def test_deploy_keeps_a_netmiko_session_log_even_when_the_deployment_fails(monke
     monkeypatch.setattr(it, "replace_config", failing_replace)
     monkeypatch.setattr(it, "DEPLOY_LOG_DIR", tmp_path)
     out = it.deploy_config(device="leaf1")
-    assert seen["session_log"] == str(tmp_path / "session-leaf1.log") and seen.get("session_log_file_mode") == "write"
+    assert seen["session_log"] == str(tmp_path / "session-leaf1.log") and seen.get("session_log_file_mode") == "append"
     assert out.startswith("Error: deployment to 'leaf1' failed") and str(tmp_path / "session-leaf1.log") in out
+
+
+def test_deploy_session_log_covers_the_whole_deployment(monkeypatch, tmp_path):
+    # review: replace_config opens a second SSH connection (show hostname) with the same params; with Netmiko's
+    # "write" mode that second connection truncated the log and left only the hostname check
+    patch_backend(monkeypatch, rendered=RENDERED + "vlan 40\n   name GUESTS\n")
+    seen, log = {}, tmp_path / "session-leaf1.log"
+    log.write_text("stale content of a previous deployment\n")
+
+    def replace(params, cfg):
+        seen.update(params); seen["log_at_call"] = log.read_text()
+        return "leaf1#\ncommit\nswitch answers after commit: leaf1"
+
+    monkeypatch.setattr(it, "replace_config", replace)
+    monkeypatch.setattr(it, "DEPLOY_LOG_DIR", tmp_path)
+    it.deploy_config(device="leaf1")
+    assert seen["session_log_file_mode"] == "append" and seen["log_at_call"] == ""   # truncated once, then appended to
+
+
+def test_deploy_reports_an_error_when_the_log_directory_cannot_be_created(monkeypatch, tmp_path):
+    # review: session_log was assigned inside the try, so a failing mkdir crashed the except clause (UnboundLocalError)
+    patch_backend(monkeypatch, rendered=RENDERED + "vlan 40\n   name GUESTS\n")
+    not_a_dir = tmp_path / "netmiko"
+    not_a_dir.write_text("")
+    monkeypatch.setattr(it, "replace_config", lambda params, cfg: "unused")
+    monkeypatch.setattr(it, "DEPLOY_LOG_DIR", not_a_dir)
+    out = it.deploy_config(device="leaf1")
+    assert out.startswith("Error: deployment to 'leaf1' failed unexpectedly")

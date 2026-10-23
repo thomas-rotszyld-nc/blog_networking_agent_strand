@@ -99,3 +99,12 @@ def test_install_sh_re_renders_main_after_loading_the_objects():
     step5 = script[script.index('step "5/9'):script.index('step "6/9')]
     assert "render_artifacts" in step5
     assert step5.index("render_artifacts") < step5.index("--out clab/generated")   # rendered first, then downloaded
+
+
+def test_install_sh_stops_when_a_download_or_environment_build_fails():
+    """Review: `cmd && echo ok` under set -e does not stop the script when cmd fails; the netmiko-mcp environment,
+    the apt install and the Docker script must fail loudly instead of letting later steps hit confusing errors."""
+    s = (ROOT / "install.sh").read_text()
+    assert "import netmiko_mcp.server\" || fail" in s
+    assert "apt-get install -y -qq git curl ca-certificates || fail" in s
+    assert "sudo sh \"$DOCKER_SCRIPT\" || fail" in s and "DOCKER_SCRIPT=$(mktemp)" in s

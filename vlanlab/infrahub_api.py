@@ -59,7 +59,8 @@ def _post(url: str, headers: dict[str, str]) -> int:
 
 
 def generate_artifacts(branch: str, definition: str = ARTIFACT_DEFINITION, client=None) -> int:
-    """Asks Infrahub to (re)render the artifacts of `definition` on `branch`; returns the HTTP status (fire-and-forget).
+    """Asks Infrahub to (re)render the artifacts of `definition` on `branch`; returns the HTTP status (fire-and-forget),
+    raises RuntimeError on an HTTP error.
 
     Infrahub 1.11 decides by itself which artifacts a branch change impacts, and for the changes of this lab (a new
     VLAN, an interface moved to it) it concluded "no applicable node changes" (spike of 2026-10-23): without this call
@@ -70,8 +71,11 @@ def generate_artifacts(branch: str, definition: str = ARTIFACT_DEFINITION, clien
     if not definitions:
         raise LookupError(f"no artifact definition named {definition!r} in Infrahub")
     address = os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000").rstrip("/")
-    return _post(f"{address}/api/artifact/generate/{definitions[0].id}?branch={branch}",
-                 {"X-INFRAHUB-KEY": os.environ.get("INFRAHUB_API_TOKEN", "")})
+    status = _post(f"{address}/api/artifact/generate/{definitions[0].id}?branch={branch}",
+                   {"X-INFRAHUB-KEY": os.environ.get("INFRAHUB_API_TOKEN", "")})
+    if status >= 400:   # a refused token or a missing branch must not surface as a rendering timeout a minute later
+        raise RuntimeError(f"Infrahub refused the rendering request for branch {branch!r}: HTTP {status}")
+    return status
 
 
 TRIGGER_WORKFLOW = "request_artifact_definitions_generate"

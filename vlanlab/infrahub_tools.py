@@ -134,10 +134,11 @@ def deploy_config(device: str) -> str:
     params, rendered, error = _resolve(device)
     if error:
         return error
+    session_log = DEPLOY_LOG_DIR / f"session-{device}.log"   # Netmiko writes the whole SSH session there, failures included
     try:
         DEPLOY_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        session_log = DEPLOY_LOG_DIR / f"session-{device}.log"   # Netmiko writes the whole SSH session there, failures included
-        output = replace_config(dict(params, session_log=str(session_log), session_log_file_mode="write"), rendered)
+        session_log.write_text("")   # one file per deployment: replace_config opens two connections, both append to it
+        output = replace_config(dict(params, session_log=str(session_log), session_log_file_mode="append"), rendered)
     except DeployError as exc:
         return f"Error: deployment to {device!r} failed: {exc}\nSession log: {session_log}"
     except Exception as exc:

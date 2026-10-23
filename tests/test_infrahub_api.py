@@ -149,3 +149,12 @@ def test_render_artifacts_waits_for_the_generation_tasks_and_reports_changes(mon
     assert api.render_artifacts(["leaf1", "leaf2"], branch="main", timeout=5, client=c) == {"leaf1": True, "leaf2": True}
     assert posted and "/api/artifact/generate/def-1?branch=main" in posted[0]
     assert c.polls >= 2   # the tasks were read after the POST, not assumed
+
+
+def test_generate_artifacts_raises_on_an_http_error(monkeypatch):
+    # review: the status was returned and ignored, so a 401/404 surfaced 60 s later as a misleading rendering timeout
+    c = RepoAwareClient([], {}, "in-sync")
+    c.filters = lambda kind, **kw: [Node(id="def-1")] if kind == "CoreArtifactDefinition" else []
+    monkeypatch.setattr(api, "_post", lambda url, headers: 401)
+    with pytest.raises(RuntimeError, match="401"):
+        api.generate_artifacts("agent/x", client=c)

@@ -50,7 +50,8 @@ def load_dotenv(path: Path = Path(".env")) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"'))
+        if value.strip().strip('"'):   # install.sh writes `ANTHROPIC_API_KEY=` when it knows no key: leave it unset
+            os.environ.setdefault(key.strip(), value.strip().strip('"'))
 
 
 def chat_handler(**kwargs) -> None:

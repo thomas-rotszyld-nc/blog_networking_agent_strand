@@ -27,13 +27,20 @@ if [ "${1:-}" = "--install-prereqs" ]; then
   esac
   step "installing the prerequisites (${PRETTY_NAME:-Debian family}, sudo)"
   export DEBIAN_FRONTEND=noninteractive
-  sudo apt-get update -qq && sudo apt-get install -y -qq git curl ca-certificates
+  sudo apt-get update -qq || fail "apt-get update failed"
+  sudo apt-get install -y -qq git curl ca-certificates || fail "apt-get install failed"
   if command -v docker >/dev/null 2>&1; then echo "  docker already installed"; else
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh && sudo sh /tmp/get-docker.sh
+    DOCKER_SCRIPT=$(mktemp)
+    curl -fsSL https://get.docker.com -o "$DOCKER_SCRIPT" || fail "could not download get.docker.com"
+    sudo sh "$DOCKER_SCRIPT" || fail "the Docker installation script failed"
+    rm -f "$DOCKER_SCRIPT"
   fi
   sudo usermod -aG docker "$(id -un)"
   if command -v containerlab >/dev/null 2>&1; then echo "  containerlab already installed"; else
-    curl -sL https://get.containerlab.dev | sudo bash
+    CLAB_SCRIPT=$(mktemp)
+    curl -fsSL https://get.containerlab.dev -o "$CLAB_SCRIPT" || fail "could not download get.containerlab.dev"
+    sudo bash "$CLAB_SCRIPT" || fail "the Containerlab installation script failed"
+    rm -f "$CLAB_SCRIPT"
   fi
   if command -v uv >/dev/null 2>&1; then echo "  uv already installed"; else
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -133,7 +140,8 @@ uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated --timeo
 
 step "6/9 netmiko-mcp (read-only, allowed commands: show vlan, show running-config)"
 # netmiko-mcp 0.2.0 targets mcp 1.x (mcp.server.fastmcp); mcp<2 pins the same environment .mcp.json launches with uvx
-uvx --from netmiko-mcp==0.2.0 --with 'mcp<2' python -c "import netmiko_mcp.server" && echo "  netmiko-mcp 0.2.0 environment ready"
+uvx --from netmiko-mcp==0.2.0 --with 'mcp<2' python -c "import netmiko_mcp.server" || fail "the netmiko-mcp 0.2.0 environment could not be built (network? uv?)"
+echo "  netmiko-mcp 0.2.0 environment ready"
 NETMIKO_DIR=$PWD/netmiko
 cat > netmiko/netmiko-mcp.yml <<YML
 inventory_type: netmiko_tools

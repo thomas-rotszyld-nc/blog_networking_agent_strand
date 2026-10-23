@@ -40,7 +40,7 @@ def test_load_dotenv_never_overrides_the_shell(monkeypatch, tmp_path):
     env = tmp_path / ".env"
     env.write_text("ANTHROPIC_API_KEY=from-file\nINFRAHUB_ADDRESS=http://from-file:8000\n")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "from-shell")
-    monkeypatch.delenv("INFRAHUB_ADDRESS", raising=False)
+    monkeypatch.setenv("INFRAHUB_ADDRESS", "placeholder"); monkeypatch.delenv("INFRAHUB_ADDRESS")   # restored after the test
     agent.load_dotenv(env)
     assert os.environ["ANTHROPIC_API_KEY"] == "from-shell"
     assert os.environ["INFRAHUB_ADDRESS"] == "http://from-file:8000"
@@ -81,3 +81,16 @@ def test_chat_prints_the_usage_line_after_each_turn(monkeypatch, capsys):
     agent.chat(FakeAgent())
     # Strands' accumulated_usage covers every invocation of the agent, so the chat says so
     assert "[usage, session total: input tokens 5 uncached + 11 cache read + 0 cache write, output tokens 7]" in capsys.readouterr().err
+
+
+def test_load_dotenv_skips_empty_values(monkeypatch, tmp_path):
+    # review: install.sh writes `ANTHROPIC_API_KEY=` when no key is known; an empty variable gave the SDK's
+    # "invalid x-api-key" instead of its clear missing-key error
+    import agent
+
+    env = tmp_path / ".env"
+    env.write_text("ANTHROPIC_API_KEY=\nINFRAHUB_ADDRESS=http://x:8000\n")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("INFRAHUB_ADDRESS", "placeholder"); monkeypatch.delenv("INFRAHUB_ADDRESS")   # restored after the test
+    agent.load_dotenv(env)
+    assert "ANTHROPIC_API_KEY" not in os.environ and os.environ["INFRAHUB_ADDRESS"] == "http://x:8000"
