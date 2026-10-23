@@ -207,4 +207,4 @@ done
 [ "$KO" -eq 0 ] || fail "at least one check failed: see the [KO] lines above"
 
 printf '\nLab ready.\n  Infrahub: %s (admin / infrahub)\n  Agent:    uv run python agent.py\n' "$INFRAHUB_ADDR"
-[ -n "$ANTHROPIC_KEY" ] || printf '  Set ANTHROPIC_API_KEY in .env before running the agent.\n'
+[ -n "${ANTHROPIC_API_KEY:-}" ] || printf '  Before running the agent: export ANTHROPIC_API_KEY=... in your shell (or put it in .env).\n'

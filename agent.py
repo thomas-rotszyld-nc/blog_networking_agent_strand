@@ -14,7 +14,8 @@ ShowInfrahubLinks (prints the branch and links of what the agent wrote in Infrah
   uv run python agent.py --list-tools     # start the MCP servers, print the tool names, exit (used by install.sh)
 
 In the chat, an empty line, "exit", "quit" or Ctrl-D ends the session; "/reset" clears the conversation.
-Environment: ANTHROPIC_API_KEY, INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN (install.sh writes them to .env).
+Environment: ANTHROPIC_API_KEY (export it in your shell, or put it in .env), INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN
+(install.sh writes the last two to .env; .env never overrides a variable already exported).
 """
 
 import os
@@ -97,6 +98,13 @@ def chat(agent: Agent) -> None:
         agent(question)
 
 
+def usage_line(result) -> str:
+    """Token count of a run, for the cost section of the README: input (with the part read from the cache) and output."""
+    usage = result.metrics.accumulated_usage
+    return (f"[usage: {usage.get('inputTokens', 0)} input tokens ({usage.get('cacheReadInputTokens', 0)} read from cache), "
+            f"{usage.get('outputTokens', 0)} output tokens]")
+
+
 def main() -> None:
     """--list-tools, one shot with the question on the command line, or the interactive chat."""
     load_dotenv()
@@ -105,7 +113,8 @@ def main() -> None:
         if len(sys.argv) > 1 and sys.argv[1] == "--list-tools":
             print("\n".join(agent.tool_names))  # starts the MCP servers
         elif len(sys.argv) > 1:
-            agent(" ".join(sys.argv[1:]))
+            result = agent(" ".join(sys.argv[1:]))
+            print(usage_line(result), file=sys.stderr)
         else:
             chat(agent)
     finally:

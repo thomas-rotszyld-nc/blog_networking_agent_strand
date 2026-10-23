@@ -24,7 +24,7 @@ the agent deploys what Infrahub rendered and verifies. Companion repository of a
 - An Arista account to download **cEOS-lab** from [arista.com](https://www.arista.com/en/support/software-download):
   `cEOS64-lab-<version>.tar.xz` for x86_64, `cEOSarm-lab-<version>.tar.xz` for arm64. Put the archive in `images/`.
   The template matches what release **4.36.2F** prints; see the note on the template below for other releases.
-- An `ANTHROPIC_API_KEY` for the agent.
+- An Anthropic API key for the agent, exported as `ANTHROPIC_API_KEY` in your shell.
 
 On Ubuntu or Debian, `sh install.sh --install-prereqs` installs Docker (official `get.docker.com` script), Containerlab
 (`get.containerlab.dev`), uv, git and curl, with `sudo`, and adds you to the `docker` group: log out and in again
@@ -46,7 +46,8 @@ this repository in Infrahub as a read-only Git repository and wait for the two r
 agent sees all its tools, and run end-to-end checks (the last one: each switch's running configuration equals Infrahub's
 rendering). First run: about 4 GB of images to pull for Infrahub, then roughly five minutes (Infrahub answers in about a
 minute, the renderings follow within seconds, the two cEOS take a little over a minute to boot). A re-run on an installed
-lab takes about half a minute. Then put your key in `.env` (`ANTHROPIC_API_KEY=...`).
+lab takes about half a minute. The agent reads `ANTHROPIC_API_KEY` from your shell; if you prefer, put it in `.env`
+instead (`.env` never overrides an exported variable, and is not committed).
 
 ## Run the demo
 

@@ -83,3 +83,10 @@ def test_install_sh_keeps_mcp_server_noise_out_of_the_tool_check():
 
 def test_install_sh_requires_the_render_tool():
     assert "render_configs" in (ROOT / "install.sh").read_text()
+
+
+def test_install_sh_accepts_the_anthropic_key_from_the_shell():
+    """The final hint looks at the environment (shell export or .env), and recommends the export."""
+    script = (ROOT / "install.sh").read_text()
+    assert '[ -n "${ANTHROPIC_API_KEY:-}" ]' in script
+    assert "export ANTHROPIC_API_KEY" in script
