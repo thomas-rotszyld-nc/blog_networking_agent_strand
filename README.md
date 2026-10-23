@@ -164,12 +164,14 @@ agent prints the token count after each turn (`[usage ...]` on stderr; in the ch
 
 | Session | Uncached input | Cache read | Cache write | Output | Cost |
 |---|---|---|---|---|---|
-| Act 1, the intent change | 16 | 84,621 | 4,312 | 1,680 | $0.07 |
-| Acts 2 and 3, deploy then verify | 20 | 90,228 | 3,379 | 1,187 | $0.06 |
-| Drift: question, then fix | 20 | 96,280 | 3,831 | 1,284 | $0.06 |
+| Act 1, the intent change | 16 | 74,825 | 14,471 | 1,877 | $0.12 |
+| Acts 2 and 3, deploy then verify | 22 | 102,120 | 3,444 | 1,327 | $0.06 |
+| Drift: question, then fix | 20 | 96,345 | 3,859 | 1,232 | $0.06 |
 
-About 20 cents for the whole demo. The prefix (system prompt, 24 tool definitions, skills) is the same at every model call,
-so almost all input is read from the cache; before caching was enabled, act 1 alone read 89,000 uncached tokens, about $0.39.
+About 25 cents for the whole demo. The prefix (system prompt, 24 tool definitions, skills) is the same at every model call,
+so almost all input is read from the cache; on a freshly installed lab, act 1 writes that prefix to the cache once (the
+14,471 tokens above), which is why it costs twice the other sessions. Before caching was enabled, act 1 alone read 89,000
+uncached tokens, about $0.39.
 
 ## On a Mac
 
