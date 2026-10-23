@@ -9,7 +9,9 @@ def test_mcp_json():
     cfg = json.loads((ROOT / ".mcp.json").read_text())["mcpServers"]
     assert set(cfg) == {"infrahub", "netmiko"}
     infrahub = " ".join(cfg["infrahub"]["args"])
+    # infrahub-mcp 1.2.0 runs through scripts/infrahub_mcp_stdio.py: one session branch for the process (opsmill/infrahub-mcp#187)
     assert "infrahub-mcp==1.2.0" in infrahub and "agent/{date}-{hex}" in infrahub
+    assert "python scripts/infrahub_mcp_stdio.py" in infrahub
     netmiko = " ".join(cfg["netmiko"]["args"])
     assert "netmiko-mcp==0.2.0" in netmiko and "netmiko/netmiko-mcp.yml" in netmiko
 

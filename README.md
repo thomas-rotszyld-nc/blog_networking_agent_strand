@@ -115,6 +115,11 @@ diff in front of you. One thing learnt on the first live run: Infrahub 1.11 deci
 impacts, and for these changes (a VLAN added to the site, an interface moved to it) it re-rendered nothing, neither on
 the branch nor on main after the merge. The lab therefore asks explicitly: the hook after `propose_changes` renders the
 branch, and `render_configs` renders main before a deployment.
+Second thing learnt there: infrahub-mcp 1.2.0 forgets its session branch between two tool calls when it runs on the
+mcp 2.x SDK (each request gets a new session object), so every write opened a new branch and the Proposed Change could
+not be created. `.mcp.json` therefore starts it through `scripts/infrahub_mcp_stdio.py`, ten lines that give the
+process a single session key, what the upstream fix ([opsmill/infrahub-mcp#187](https://github.com/opsmill/infrahub-mcp/pull/187))
+does for stdio; drop the wrapper once that fix is released.
 
 **`netmiko-mcp` for reads, a custom tool for writes.** [netmiko-mcp](https://github.com/ktbyers/netmiko_mcp) is the
 official MCP server of Netmiko's author. It is read-only by design and enforces a server-side command whitelist
