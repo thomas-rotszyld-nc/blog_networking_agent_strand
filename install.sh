@@ -88,6 +88,8 @@ if [ -n "$MEM_KB" ] && [ "$MEM_KB" -lt 15000000 ]; then echo "  [..] less than 1
 
 step "1/9 .env (tokens and secrets kept across runs)"
 getenv() { grep "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true; }
+# a key without a value becomes a comment: step 2 sources .env with `set -a`, and `KEY=` would blank a key exported in the shell
+keyline() { if [ -n "$2" ]; then printf '%s=%s\n' "$1" "$2"; else printf '# %s=   (set it here, or export it in your shell)\n' "$1"; fi; }
 uuid() { uv run python -c "import uuid; print(uuid.uuid4())"; }
 ADMIN_TOKEN=$(getenv INFRAHUB_INITIAL_ADMIN_TOKEN); [ -n "$ADMIN_TOKEN" ] || { ADMIN_TOKEN=$(uuid); echo "  generated the Infrahub admin token"; }
 AGENT_TOKEN=$(getenv INFRAHUB_INITIAL_AGENT_TOKEN); [ -n "$AGENT_TOKEN" ] || AGENT_TOKEN=$(uuid)
@@ -111,9 +113,9 @@ cat > .env <<ENV
 # Written by install.sh; not committed. Re-runs keep these values.
 MODEL_PROVIDER=$PROVIDER
 MODEL_ID=$MODEL_ID_KEPT
-ANTHROPIC_API_KEY=$ANTHROPIC_KEY
-OPENAI_API_KEY=$OPENAI_KEY
-GEMINI_API_KEY=$GEMINI_KEY
+$(keyline ANTHROPIC_API_KEY "$ANTHROPIC_KEY")
+$(keyline OPENAI_API_KEY "$OPENAI_KEY")
+$(keyline GEMINI_API_KEY "$GEMINI_KEY")
 INFRAHUB_ADDRESS=$INFRAHUB_ADDR
 INFRAHUB_API_TOKEN=$ADMIN_TOKEN
 INFRAHUB_INITIAL_ADMIN_TOKEN=$ADMIN_TOKEN

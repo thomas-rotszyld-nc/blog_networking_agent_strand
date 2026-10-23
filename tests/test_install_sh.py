@@ -133,3 +133,18 @@ def test_install_sh_final_hint_names_the_key_of_the_chosen_provider():
     tail = s[s.index("Lab ready"):]
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
         assert var in tail, var
+
+
+def test_install_sh_never_writes_an_empty_key_line_to_dotenv():
+    """Step 2 sources .env with `set -a`: an `ANTHROPIC_API_KEY=` line written for a reader who exports the key in the
+    shell blanked that export, and the final hint then asked for a key that was there. Empty keys become a comment."""
+    s = (ROOT / "install.sh").read_text()
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        assert f"{var}=$" not in s, var                     # no unconditional KEY=$VALUE line in the heredoc
+        assert f"keyline {var}" in s, var
+    keyline = next(line for line in s.splitlines() if line.startswith("keyline()"))
+    r = subprocess.run(["sh", "-c", keyline + '; keyline OPENAI_API_KEY ""; keyline OPENAI_API_KEY sk-test'],
+                       capture_output=True, text=True)
+    lines = r.stdout.splitlines()
+    assert lines[0].startswith("#") and "OPENAI_API_KEY" in lines[0]     # a comment: sourcing it changes nothing
+    assert lines[1] == "OPENAI_API_KEY=sk-test"                           # a kept value is written as before
