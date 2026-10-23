@@ -34,8 +34,8 @@ afterwards. It is opt-in because it runs downloaded scripts as root; on another 
 ## Install
 
 ```sh
-git clone https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand.git
-cd blog_networking_agent_strand
+git clone https://github.com/thomas-rotszyld-nc/network-agent-strands.git
+cd network-agent-strands
 cp /path/to/cEOS64-lab-*.tar.xz images/
 sh install.sh            # sh install.sh --check-prereqs to only check the prerequisites
 ```

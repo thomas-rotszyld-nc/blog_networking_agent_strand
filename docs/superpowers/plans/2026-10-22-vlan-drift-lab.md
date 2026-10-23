@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Repo language English; licence MIT; repo `https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand`, default branch `main`.
+- Repo language English; licence MIT; repo `https://github.com/thomas-rotszyld-nc/network-agent-strands`, default branch `main`.
 - No trace of `strand_agents_lab` data: no `c9500`, `poc`, `NGW`, `strand-agents-lab`, `5trandagent5lab`, `Europe/Paris`, `*-Lab-2026-password`, no NetBox.
 - Fixed names: site `lab` (LocationSite, name `lab`); devices `leaf1`, `leaf2` (DcimDevice, role `leaf`, status `active`, platform `Arista EOS`, device type `cEOS-lab`, manufacturer `Arista`); group `leafs` (CoreStandardGroup); VLAN group `lab-vlans` scoped to the site; VLANs `USERS`/10, `VOICE`/20, `IOT`/30 (IpamVLAN, status `active`); interfaces `Ethernet1..3` (InterfacePhysical, role `access`, status `active`, `l2_mode: access`, `untagged_vlan` 10/20/30) and `Management0` (role `management`); management IPs `172.20.20.11/24`, `172.20.20.12/24` (IpamIPAddress, device `primary_address`); Containerlab lab `vlan-lab` (containers `clab-vlan-lab-leaf1/2`), image tag `ceos:lab`, credentials `admin`/`admin`; Infrahub at `http://localhost:8000`; compose project `vlan-lab`.
 - `.infrahub.yml`: query `leaf_config`, Jinja2 transform `eos_leaf`, artifact definition `leaf_startup_config` (artifact_name `startup-config`, `text/plain`, targets `leafs`, parameters `device: name__value`).
@@ -48,7 +48,7 @@ Expected: `up` within a few minutes; UI at `http://localhost:8000` (admin / infr
 
 - [ ] **Step 2: Load schema and a minimal data set, register the spike branch read-only**
 
-Run (with `INFRAHUB_ADDRESS` and `INFRAHUB_API_TOKEN` exported): `uv run infrahubctl schema load infrahub/schema --wait 60 && uv run infrahubctl object load infrahub/objects && git push -u origin spike/readonly-repo && uv run infrahubctl repository add blog-lab https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand --read-only --ref spike/readonly-repo`
+Run (with `INFRAHUB_ADDRESS` and `INFRAHUB_API_TOKEN` exported): `uv run infrahubctl schema load infrahub/schema --wait 60 && uv run infrahubctl object load infrahub/objects && git push -u origin spike/readonly-repo && uv run infrahubctl repository add blog-lab https://github.com/thomas-rotszyld-nc/network-agent-strands --read-only --ref spike/readonly-repo`
 Expected: in the UI, Repository `blog-lab` reaches status `in-sync`; two `CoreArtifact` nodes of definition `leaf_startup_config` appear with status `Ready`. Note the elapsed time.
 
 - [ ] **Step 3: Data branch + Proposed Change, look for the artifact diff**
@@ -812,7 +812,7 @@ Expected: FAIL, script missing.
 
 POSIX sh, `set -e`, `cd "$(dirname "$0")"`, `step()` helper, `--check-prereqs` runs step 0 only. Steps printed `== N/9 …`:
 0. Prerequisites, all checked before exiting: `docker info` without sudo, `docker compose version`, `containerlab version` (print the official install line), `uv`, `git`, `curl`, exactly one archive among `images/cEOS64-lab-*.tar*`, `images/cEOS-lab-*.tar*`, `images/cEOSarm-lab-*.tar*` (none → Arista download URL and location; several → lexically last, say so), RAM ≥ 16 GB (warning only). Any gap → exit 1 after the list.
-1. `.env`: keep or generate `INFRAHUB_INITIAL_ADMIN_TOKEN` (uuid), `INFRAHUB_INITIAL_AGENT_TOKEN` (uuid), `INFRAHUB_SECURITY_SECRET_KEY` (≥ 32 chars); set `INFRAHUB_API_TOKEN=$INFRAHUB_INITIAL_ADMIN_TOKEN`, `INFRAHUB_ADDRESS=http://localhost:8000`; keep or default `INFRAHUB_REPO_URL=https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand`, `INFRAHUB_REPO_REF=main`; keep `ANTHROPIC_API_KEY` or write it empty with a comment.
+1. `.env`: keep or generate `INFRAHUB_INITIAL_ADMIN_TOKEN` (uuid), `INFRAHUB_INITIAL_AGENT_TOKEN` (uuid), `INFRAHUB_SECURITY_SECRET_KEY` (≥ 32 chars); set `INFRAHUB_API_TOKEN=$INFRAHUB_INITIAL_ADMIN_TOKEN`, `INFRAHUB_ADDRESS=http://localhost:8000`; keep or default `INFRAHUB_REPO_URL=https://github.com/thomas-rotszyld-nc/network-agent-strands`, `INFRAHUB_REPO_REF=main`; keep `ANTHROPIC_API_KEY` or write it empty with a comment.
 2. Infrahub: `curl -sL https://infrahub.opsmill.io/1.11.9 -o infrahub/docker-compose.yml` if missing; `docker compose -p vlan-lab -f infrahub/docker-compose.yml --env-file .env up -d`; wait for `GET /api/config` (15 minutes max).
 3. Schema: `uv sync` then `uv run infrahubctl schema load infrahub/schema --wait 60`.
 4. Objects: `uv run infrahubctl object load infrahub/objects`.

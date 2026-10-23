@@ -13,7 +13,7 @@
 set -e
 cd "$(dirname "$0")"
 unset DOCKER_DEFAULT_PLATFORM   # the lab runs native; a shell exporting linux/amd64 (common on Macs) would make Docker emulate everything
-REPO_URL_DEFAULT=https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand
+REPO_URL_DEFAULT=https://github.com/thomas-rotszyld-nc/network-agent-strands
 INFRAHUB_COMPOSE_URL=https://infrahub.opsmill.io/1.11.9
 INFRAHUB_ADDR=http://localhost:8000
 step() { printf '\n== %s\n' "$*"; }

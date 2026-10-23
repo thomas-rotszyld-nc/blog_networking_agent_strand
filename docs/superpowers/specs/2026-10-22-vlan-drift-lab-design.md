@@ -99,7 +99,7 @@ Git raccordé (requête GraphQL + template Jinja2 + définition d'artifact), bra
   `get_session_info`. Le serveur lit lui-même `INFRAHUB_ADDRESS` / `INFRAHUB_API_TOKEN` dans `./.env`
   (`INFRAHUB_MCP_ENV_FILE`). Il exige Python 3.13, que `uvx` fournit. Interface : `/objects/<Kind>/<id>?branch=<b>`
   et `/proposed-changes/<id>`.
-- **Dépôt Git raccordé** : le repo compagnon lui-même, `https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand`,
+- **Dépôt Git raccordé** : le repo compagnon lui-même, `https://github.com/thomas-rotszyld-nc/network-agent-strands`,
   branche par défaut `main`, enregistré dans Infrahub en lecture seule (`infrahubctl repository add --read-only
   --ref main`), URL et ref surchargeables par `INFRAHUB_REPO_URL` / `INFRAHUB_REPO_REF` pour un fork ou une branche
   de développement. Un dépôt en lecture seule **ne suit pas les pushs** (règle du plugin `infrahub-skills`,
