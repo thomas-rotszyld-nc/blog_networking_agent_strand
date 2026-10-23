@@ -61,3 +61,11 @@ def test_install_sh_runs_docker_native_and_verifies_the_token_before_loading():
     i_schema = s.index("infrahubctl schema load")           # ...before anything is loaded
     assert i_up < i_tok < i_schema
     assert "uninstall.sh --purge" in s                      # the remedy when the data volumes outlived the .env
+
+
+def test_netmiko_mcp_runs_on_mcp_1x():
+    # netmiko-mcp 0.2.0 imports mcp.server.fastmcp, removed in mcp 2.x; an unpinned uvx resolves 2.x and crashes at start
+    mcp_json = (ROOT / ".mcp.json").read_text()
+    assert "netmiko-mcp==0.2.0" in mcp_json and "mcp<2" in mcp_json
+    s = (ROOT / "install.sh").read_text()
+    assert "mcp<2" in s and "uv tool install" not in s   # the same uvx environment as .mcp.json, pre-built at install

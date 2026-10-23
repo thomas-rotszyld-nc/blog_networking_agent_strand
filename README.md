@@ -109,7 +109,8 @@ diff in front of you.
 
 **`netmiko-mcp` for reads, a custom tool for writes.** [netmiko-mcp](https://github.com/ktbyers/netmiko_mcp) is the
 official MCP server of Netmiko's author. It is read-only by design and enforces a server-side command whitelist
-(`netmiko/commands.yml`: `show vlan`, `show running-config`); it has no configuration mode. Writes therefore go through
+(`netmiko/commands.yml`: `show vlan`, `show running-config`); it has no configuration mode. Version 0.2.0 is launched
+with `mcp<2` pinned: it imports an API that the `mcp` 2.x SDK removed. Writes therefore go through
 `deploy_config`, a Strands tool of this repository, where the agent's own guards apply, and which deploys Infrahub's
 rendering and nothing else.
 

@@ -6,7 +6,7 @@
     },
     "netmiko": {
       "command": "sh",
-      "args": ["-c", "NETMIKO_MCP_CONFIG=netmiko/netmiko-mcp.yml exec uvx --from netmiko-mcp==0.2.0 netmiko-mcp"]
+      "args": ["-c", "NETMIKO_MCP_CONFIG=netmiko/netmiko-mcp.yml exec uvx --from netmiko-mcp==0.2.0 --with 'mcp<2' netmiko-mcp"]
     }
   }
 }

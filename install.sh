@@ -129,7 +129,8 @@ fi
 uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated --timeout 600
 
 step "6/9 netmiko-mcp (read-only, allowed commands: show vlan, show running-config)"
-uv tool install --quiet netmiko-mcp==0.2.0
+# netmiko-mcp 0.2.0 targets mcp 1.x (mcp.server.fastmcp); mcp<2 pins the same environment .mcp.json launches with uvx
+uvx --from netmiko-mcp==0.2.0 --with 'mcp<2' python -c "import netmiko_mcp.server" && echo "  netmiko-mcp 0.2.0 environment ready"
 NETMIKO_DIR=$PWD/netmiko
 cat > netmiko/netmiko-mcp.yml <<YML
 inventory_type: netmiko_tools
