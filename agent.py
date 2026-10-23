@@ -14,7 +14,9 @@ ShowInfrahubLinks (prints the branch and links of what the agent wrote in Infrah
   uv run python agent.py --list-tools     # start the MCP servers, print the tool names, exit (used by install.sh)
 
 In the chat, an empty line, "exit", "quit" or Ctrl-D ends the session; "/reset" clears the conversation.
-Environment: ANTHROPIC_API_KEY (export it in your shell, or put it in .env), INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN
+Environment: MODEL_PROVIDER (anthropic, the default, openai or gemini; install.sh asks and writes it to .env), MODEL_ID
+(optional, replaces the provider's default model), the provider's key (ANTHROPIC_API_KEY, OPENAI_API_KEY or
+GEMINI_API_KEY: export it in your shell, or put it in .env), INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN
 (install.sh writes the last two to .env; .env never overrides a variable already exported). The MCP servers see only .env:
 the MCP SDK starts a stdio server with six variables of the environment (HOME, PATH...), so .mcp.json loads .env itself.
 When a server fails to start, its stderr in logs/ says why; the agent quotes it and exits.
@@ -26,7 +28,6 @@ import sys
 from pathlib import Path
 
 from strands import Agent, AgentSkills
-from strands.models.anthropic import AnthropicModel
 from strands.models.model import CacheConfig
 from strands.tools.mcp import MCPClient
 
@@ -45,6 +46,12 @@ Be concise, answer in the user's language, and report refusals or errors as they
 
 
 LOGS = Path("logs")   # where .mcp.json sends the servers' stderr: logs/<server>-mcp.log
+MAX_TOKENS = 16000
+PROVIDERS = {   # MODEL_PROVIDER: (default model, key variable). The defaults sit at the price level of Claude Opus 5.5.
+    "anthropic": ("claude-opus-5-5", "ANTHROPIC_API_KEY"),
+    "openai": ("gpt-6.1-sol", "OPENAI_API_KEY"),
+    "gemini": ("gemini-4-argon", "GEMINI_API_KEY"),
+}
 
 
 def load_dotenv(path: Path = Path(".env")) -> None:
@@ -93,13 +100,50 @@ def mcp_startup_error(offsets: dict[Path, int]) -> str:
     return f"an MCP server of .mcp.json did not start; its stderr is in {LOGS}/:\n{detail}"
 
 
+def provider() -> tuple[str, str, str]:
+    """(provider, model id, key variable) from MODEL_PROVIDER and MODEL_ID; exits on a provider the lab does not know."""
+    name = os.environ.get("MODEL_PROVIDER", "anthropic").strip().lower()
+    if name not in PROVIDERS:
+        raise SystemExit(f"MODEL_PROVIDER={name!r} in .env or the shell: the lab knows anthropic, openai and gemini"
+                         " (sh install.sh --provider <name> rewrites .env)")
+    default_model, key_var = PROVIDERS[name]
+    return name, os.environ.get("MODEL_ID") or default_model, key_var
+
+
+def build_model():
+    """The Strands model of the chosen provider. Its client reads the key from the environment. The prompt cache is an
+    Anthropic feature: with it, almost all of a turn's input is read from the cache (see the cost section of the README)."""
+    name, model_id, key_var = provider()
+    if name == "anthropic":
+        from strands.models.anthropic import AnthropicModel
+
+        return AnthropicModel(model_id=model_id, max_tokens=MAX_TOKENS,
+                              cache_config=CacheConfig(ttl="5m", system_prompt_ttl=True, tools_ttl=True))  # the prefix is the same every turn
+    if name == "openai":
+        from strands.models.openai import OpenAIModel
+
+        # the OpenAI client refuses to construct without a key; install.sh lists the tools before the reader has one
+        client_args = {} if os.environ.get(key_var) else {"api_key": "unset"}
+        return OpenAIModel(client_args=client_args, model_id=model_id, params={"max_completion_tokens": MAX_TOKENS})
+    from strands.models.gemini import GeminiModel
+
+    return GeminiModel(model_id=model_id, params={"max_output_tokens": MAX_TOKENS})
+
+
+def missing_key_hint() -> str | None:
+    """One line for the terminal when the chosen provider's key is not set; None when it is."""
+    name, _, key_var = provider()
+    if os.environ.get(key_var) or (name == "gemini" and os.environ.get("GOOGLE_API_KEY")):
+        return None
+    return f"{key_var} is not set: export it in your shell (or put it in .env) before asking the agent anything"
+
+
 def build_agent() -> Agent:
-    """The agent: Anthropic model, the two MCP servers of .mcp.json, the two local tools, hooks, steering and skills."""
+    """The agent: the model of MODEL_PROVIDER, the two MCP servers of .mcp.json, the two local tools, hooks, steering, skills."""
     servers = MCPClient.load_servers(".mcp.json")
     infrahub = servers[0] if servers else None  # .mcp.json lists infrahub first; the hook only needs call_tool_sync
     base_url = os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000")
-    model = AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000,  # ANTHROPIC_API_KEY from the environment
-                           cache_config=CacheConfig(ttl="5m", system_prompt_ttl=True, tools_ttl=True))  # the prefix is the same every turn
+    model = build_model()
     offsets = mcp_log_offsets()
     try:
         return Agent(model=model, tools=[*servers, render_configs, preview_config, deploy_config], system_prompt=SYSTEM_PROMPT,
@@ -144,6 +188,8 @@ def usage_line(result, label: str = "usage") -> str:
 def main() -> None:
     """--list-tools, one shot with the question on the command line, or the interactive chat."""
     load_dotenv()
+    if hint := missing_key_hint():
+        print(hint, file=sys.stderr)
     agent = build_agent()
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "--list-tools":

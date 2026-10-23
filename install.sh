@@ -3,7 +3,8 @@
 # startup-configs), netmiko-mcp, two cEOS leafs under Containerlab booting from those startup-configs, and the agent.
 # Idempotent: safe to run again.
 #
-#   sh install.sh                   # everything, with checks at the end
+#   sh install.sh                   # everything, with checks at the end; step 1 asks which model provider (Enter: Anthropic)
+#   sh install.sh --provider openai # same, with the provider given (anthropic, openai or gemini); re-runs keep the choice
 #   sh install.sh --check-prereqs   # only step 0
 #   sh install.sh --install-prereqs # Ubuntu/Debian only: install Docker, Containerlab, uv, git and curl (sudo), then exit
 #
@@ -17,6 +18,15 @@ INFRAHUB_COMPOSE_URL=https://infrahub.opsmill.io/1.11.9
 INFRAHUB_ADDR=http://localhost:8000
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
+
+PROVIDER_ARG=""
+if [ "${1:-}" = "--provider" ]; then
+  case "${2:-}" in
+    anthropic|openai|gemini) PROVIDER_ARG=$2 ;;
+    *) fail "--provider takes anthropic, openai or gemini (got '${2:-}')" ;;
+  esac
+  shift 2
+fi
 
 if [ "${1:-}" = "--install-prereqs" ]; then
   # Opt-in, because it runs the official install scripts of Docker and Containerlab with sudo.
@@ -84,10 +94,26 @@ AGENT_TOKEN=$(getenv INFRAHUB_INITIAL_AGENT_TOKEN); [ -n "$AGENT_TOKEN" ] || AGE
 SECRET_KEY=$(getenv INFRAHUB_SECURITY_SECRET_KEY); [ -n "$SECRET_KEY" ] || SECRET_KEY=$(uv run python -c "import secrets; print(secrets.token_urlsafe(48))")
 REPO_URL=$(getenv INFRAHUB_REPO_URL); [ -n "$REPO_URL" ] || REPO_URL=$REPO_URL_DEFAULT
 REPO_REF=$(getenv INFRAHUB_REPO_REF); [ -n "$REPO_REF" ] || REPO_REF=main
-ANTHROPIC_KEY=$(getenv ANTHROPIC_API_KEY)
+ANTHROPIC_KEY=$(getenv ANTHROPIC_API_KEY); OPENAI_KEY=$(getenv OPENAI_API_KEY); GEMINI_KEY=$(getenv GEMINI_API_KEY)
+MODEL_ID_KEPT=$(getenv MODEL_ID)
+# the model provider: --provider, else the choice of an earlier run, else a question (Enter: Anthropic; no terminal: Anthropic)
+PROVIDER=${PROVIDER_ARG:-$(getenv MODEL_PROVIDER)}
+if [ -z "$PROVIDER" ]; then
+  PROVIDER=anthropic
+  if [ -t 0 ]; then
+    printf '  Model provider for the agent: [1] Anthropic (default)  [2] OpenAI  [3] Gemini  > '
+    read -r answer || answer=""
+    case "$answer" in 2|openai|OpenAI) PROVIDER=openai ;; 3|gemini|Gemini) PROVIDER=gemini ;; esac
+  fi
+fi
+echo "  model provider: $PROVIDER (kept across runs; change it with: sh install.sh --provider anthropic|openai|gemini)"
 cat > .env <<ENV
 # Written by install.sh; not committed. Re-runs keep these values.
+MODEL_PROVIDER=$PROVIDER
+MODEL_ID=$MODEL_ID_KEPT
 ANTHROPIC_API_KEY=$ANTHROPIC_KEY
+OPENAI_API_KEY=$OPENAI_KEY
+GEMINI_API_KEY=$GEMINI_KEY
 INFRAHUB_ADDRESS=$INFRAHUB_ADDR
 INFRAHUB_API_TOKEN=$ADMIN_TOKEN
 INFRAHUB_INITIAL_ADMIN_TOKEN=$ADMIN_TOKEN
@@ -218,4 +244,9 @@ done
 [ "$KO" -eq 0 ] || fail "at least one check failed: see the [KO] lines above"
 
 printf '\nLab ready.\n  Infrahub: %s (admin / infrahub)\n  Agent:    uv run python agent.py\n' "$INFRAHUB_ADDR"
-[ -n "${ANTHROPIC_API_KEY:-}" ] || printf '  Before running the agent: export ANTHROPIC_API_KEY=... in your shell (or put it in .env).\n'
+hint() { printf '  Before running the agent: export %s=... in your shell (or put it in .env).\n' "$1"; }
+case "$PROVIDER" in
+  openai) [ -n "${OPENAI_API_KEY:-}" ] || hint OPENAI_API_KEY ;;
+  gemini) [ -n "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}" ] || hint GEMINI_API_KEY ;;
+  *) [ -n "${ANTHROPIC_API_KEY:-}" ] || hint ANTHROPIC_API_KEY ;;
+esac

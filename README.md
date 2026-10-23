@@ -24,7 +24,8 @@ the agent deploys what Infrahub rendered and verifies. Companion repository of a
 - An Arista account to download **cEOS-lab** from [arista.com](https://www.arista.com/en/support/software-download):
   `cEOS64-lab-<version>.tar.xz` for x86_64, `cEOSarm-lab-<version>.tar.xz` for arm64. Put the archive in `images/`.
   The template matches what release **4.36.2F** prints; see the note on the template below for other releases.
-- An Anthropic API key for the agent, exported as `ANTHROPIC_API_KEY` in your shell.
+- An API key for the agent's model: Anthropic by default (`ANTHROPIC_API_KEY`), or OpenAI or Gemini, see
+  [Choosing the model](#choosing-the-model). Exported in your shell, or put in `.env`.
 
 On Ubuntu or Debian, `sh install.sh --install-prereqs` installs Docker (official `get.docker.com` script), Containerlab
 (`get.containerlab.dev`), uv, git and curl, with `sudo`, and adds you to the `docker` group: log out and in again
@@ -46,8 +47,25 @@ this repository in Infrahub as a read-only Git repository and wait for the two r
 agent sees all its tools, and run end-to-end checks (the last one: each switch's running configuration equals Infrahub's
 rendering). First run: about 4 GB of images to pull for Infrahub, then roughly five minutes (Infrahub answers in about a
 minute, the renderings follow within seconds, the two cEOS take a little over a minute to boot). A re-run on an installed
-lab takes about half a minute. The agent reads `ANTHROPIC_API_KEY` from your shell; if you prefer, put it in `.env`
-instead (`.env` never overrides an exported variable, and is not committed).
+lab takes about half a minute. On the first run, step 1 asks which model provider the agent uses (Enter keeps
+Anthropic); the agent reads the provider's key from your shell, or from `.env` if you prefer (`.env` never overrides an
+exported variable, and is not committed).
+
+## Choosing the model
+
+`install.sh` writes `MODEL_PROVIDER` to `.env` and keeps it across runs; `sh install.sh --provider openai` (or `gemini`,
+`anthropic`) changes it. One default model per provider, all three at about the price of Claude Opus 5.5; `MODEL_ID` in
+`.env` replaces it with any other model of the same provider.
+
+| `MODEL_PROVIDER` | Default model | Key to export | List price, input / output per million tokens |
+|---|---|---|---|
+| `anthropic` (default) | `claude-opus-5-5` | `ANTHROPIC_API_KEY` | $4 / $20 |
+| `openai` | `gpt-6.1-sol` | `OPENAI_API_KEY` | $2 / $10 |
+| `gemini` | `gemini-4-argon` | `GEMINI_API_KEY` | $2 / $10 until 30 November 2026, then $4 / $20 |
+
+The demo transcript, the cost table below and the prompt-cache figures were measured with Anthropic; the agent prints
+the token count of every turn whichever provider runs it. Strands ships more providers (Bedrock, Mistral, Ollama,
+LiteLLM...): adding one is a branch in `build_model()` of `agent.py`.
 
 ## Run the demo
 
@@ -141,8 +159,8 @@ before `sh install.sh`. A read-only repository does not follow pushes: after pus
 
 ## Cost of a demo session
 
-Measured on the run in `docs/demo-transcript.txt` (claude-opus-5-5, prompt caching on, list prices). The agent prints
-the token count after each turn (`[usage ...]` on stderr; in the chat it is the session total).
+Measured on the run in `docs/demo-transcript.txt` (Anthropic, claude-opus-5-5, prompt caching on, list prices). The
+agent prints the token count after each turn (`[usage ...]` on stderr; in the chat it is the session total).
 
 | Session | Uncached input | Cache read | Cache write | Output | Cost |
 |---|---|---|---|---|---|

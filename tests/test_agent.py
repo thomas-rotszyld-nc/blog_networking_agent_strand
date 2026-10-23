@@ -150,3 +150,69 @@ def test_build_agent_turns_a_server_start_failure_into_a_readable_exit(monkeypat
     monkeypatch.setattr(agent, "Agent", other_failure)
     with pytest.raises(ValueError, match="something else"):   # only server start failures are translated
         agent.build_agent()
+
+
+def _provider_env(monkeypatch, provider=None, model_id=None, **keys):
+    for var in ("MODEL_PROVIDER", "MODEL_ID", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    if provider:
+        monkeypatch.setenv("MODEL_PROVIDER", provider)
+    if model_id:
+        monkeypatch.setenv("MODEL_ID", model_id)
+    for var, value in keys.items():
+        monkeypatch.setenv(var, value)
+
+
+def test_build_model_defaults_to_anthropic_opus_with_caching(monkeypatch):
+    """No MODEL_PROVIDER in .env: the lab runs as before, Claude Opus 5.5 with the prompt cache on."""
+    import agent
+
+    _provider_env(monkeypatch, ANTHROPIC_API_KEY="test")
+    m = agent.build_model()
+    assert type(m).__name__ == "AnthropicModel" and m.get_config()["model_id"] == "claude-opus-5-5"
+    cache = m.get_config().get("cache_config")
+    assert cache is not None and cache.system_prompt_ttl and cache.tools_ttl
+
+
+def test_build_model_openai_and_gemini_with_their_default_models(monkeypatch):
+    """One model per provider, at the price level of Opus 5.5; MODEL_ID in .env overrides it."""
+    import agent
+
+    _provider_env(monkeypatch, "openai", OPENAI_API_KEY="test")
+    m = agent.build_model()
+    assert type(m).__name__ == "OpenAIModel" and m.get_config()["model_id"] == "gpt-6.1-sol"
+    _provider_env(monkeypatch, "gemini", GEMINI_API_KEY="test")
+    m = agent.build_model()
+    assert type(m).__name__ == "GeminiModel" and m.get_config()["model_id"] == "gemini-4-argon"
+    _provider_env(monkeypatch, "openai", model_id="gpt-6-astra", OPENAI_API_KEY="test")
+    assert agent.build_model().get_config()["model_id"] == "gpt-6-astra"
+
+
+def test_build_model_constructs_without_the_key(monkeypatch):
+    """install.sh step 8 lists the tools before the reader has exported a key: the OpenAI and Gemini clients refuse to
+    construct without one, so the model is built with a placeholder and the hint names the variable to export."""
+    import agent
+
+    for provider, var in (("openai", "OPENAI_API_KEY"), ("gemini", "GEMINI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY")):
+        _provider_env(monkeypatch, provider)
+        agent.build_model()                              # no exception
+        assert var in agent.missing_key_hint()
+    _provider_env(monkeypatch, "openai", OPENAI_API_KEY="test")
+    assert agent.missing_key_hint() is None
+
+
+def test_build_model_rejects_an_unknown_provider(monkeypatch):
+    import pytest
+
+    import agent
+
+    _provider_env(monkeypatch, "mistral")
+    with pytest.raises(SystemExit) as exc:
+        agent.build_model()
+    assert "anthropic" in str(exc.value) and "openai" in str(exc.value) and "gemini" in str(exc.value)
+
+
+def test_pyproject_installs_the_three_providers():
+    """Switching provider in .env must not require a reinstall."""
+    s = (ROOT / "pyproject.toml").read_text()
+    assert "strands-agents[anthropic,gemini,openai]" in s

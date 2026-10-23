@@ -89,7 +89,7 @@ def test_install_sh_accepts_the_anthropic_key_from_the_shell():
     """The final hint looks at the environment (shell export or .env), and recommends the export."""
     script = (ROOT / "install.sh").read_text()
     assert '[ -n "${ANTHROPIC_API_KEY:-}" ]' in script
-    assert "export ANTHROPIC_API_KEY" in script
+    assert "export %s=" in script and "hint ANTHROPIC_API_KEY" in script
 
 
 def test_install_sh_re_renders_main_after_loading_the_objects():
@@ -108,3 +108,28 @@ def test_install_sh_stops_when_a_download_or_environment_build_fails():
     assert "import netmiko_mcp.server\" || fail" in s
     assert "apt-get install -y -qq git curl ca-certificates || fail" in s
     assert "sudo sh \"$DOCKER_SCRIPT\" || fail" in s and "DOCKER_SCRIPT=$(mktemp)" in s
+
+
+def test_install_sh_asks_for_the_model_provider_once_and_keeps_it():
+    """Step 1 asks the reader which provider to use (Enter = Anthropic), writes MODEL_PROVIDER to .env and, like the
+    tokens, keeps it on re-runs; --provider answers without the prompt (re-runs, no terminal)."""
+    s = (ROOT / "install.sh").read_text()
+    step1 = s[s.index('step "1/9'):s.index('step "2/9')]
+    assert "getenv MODEL_PROVIDER" in step1 and "MODEL_PROVIDER=$PROVIDER" in step1
+    assert "read " in step1 and "anthropic" in step1 and "openai" in step1 and "gemini" in step1
+    assert "--provider" in s[:s.index('step "0/9')]       # parsed before anything runs
+
+
+def test_install_sh_refuses_an_unknown_provider_before_doing_anything():
+    r = subprocess.run(["sh", str(ROOT / "install.sh"), "--provider", "mistral"], cwd=ROOT, capture_output=True,
+                       text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(ROOT)})
+    out = r.stdout + r.stderr
+    assert r.returncode == 1 and "anthropic" in out and "openai" in out and "gemini" in out
+    assert "prerequisites" not in out
+
+
+def test_install_sh_final_hint_names_the_key_of_the_chosen_provider():
+    s = (ROOT / "install.sh").read_text()
+    tail = s[s.index("Lab ready"):]
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        assert var in tail, var
