@@ -7,8 +7,8 @@ VM. Nothing in the repository depends on OrbStack; it is just the VM used by the
 
 1. OrbStack (or Lima, Multipass, UTM): create an **Ubuntu 24.04 arm64** VM with **16 GB of RAM and 6 CPUs**. Infrahub
    alone wants 8 GB.
-2. Inside the VM: Docker Engine (user in the `docker` group), Containerlab (`bash -c "$(curl -sL https://get.containerlab.dev)"`),
-   uv, git, curl.
+2. Inside the VM: Docker Engine (user in the `docker` group), Containerlab, uv, git, curl. The OrbStack Ubuntu image
+   ships none of them: `sh install.sh --install-prereqs` installs all five, then log out and in again.
 3. Clone the repository inside the VM (not on a macOS mount: Docker volumes and Containerlab binds behave better).
 4. cEOS: download the **ARM** build (`cEOSarm-lab-<version>.tar.xz`, EFT) from arista.com into `images/`. `install.sh`
    accepts `cEOS64-lab-*`, `cEOS-lab-*` and `cEOSarm-lab-*`.

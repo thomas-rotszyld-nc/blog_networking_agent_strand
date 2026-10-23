@@ -3,8 +3,9 @@
 # startup-configs), netmiko-mcp, two cEOS leafs under Containerlab booting from those startup-configs, and the agent.
 # Idempotent: safe to run again.
 #
-#   sh install.sh                 # everything, with checks at the end
-#   sh install.sh --check-prereqs # only step 0
+#   sh install.sh                   # everything, with checks at the end
+#   sh install.sh --check-prereqs   # only step 0
+#   sh install.sh --install-prereqs # Ubuntu/Debian only: install Docker, Containerlab, uv, git and curl (sudo), then exit
 #
 # Requires: Docker + Compose v2 usable without sudo, containerlab, uv, git, curl, an Arista cEOS-lab archive in images/,
 # 16 GB of RAM. `sudo` is used for containerlab only. Run from the project directory.
@@ -15,6 +16,30 @@ INFRAHUB_COMPOSE_URL=https://infrahub.opsmill.io/1.11.9
 INFRAHUB_ADDR=http://localhost:8000
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
+
+if [ "${1:-}" = "--install-prereqs" ]; then
+  # Opt-in, because it runs the official install scripts of Docker and Containerlab with sudo.
+  [ -r /etc/os-release ] && . /etc/os-release   # a missing file would abort a POSIX sh under set -e if sourced directly
+  case " ${ID:-} ${ID_LIKE:-} " in
+    *ubuntu*|*debian*) ;;
+    *) fail "--install-prereqs only knows Ubuntu and Debian; install Docker, Containerlab, uv, git and curl by hand (see the [KO] lines of: sh install.sh --check-prereqs)" ;;
+  esac
+  step "installing the prerequisites (${PRETTY_NAME:-Debian family}, sudo)"
+  export DEBIAN_FRONTEND=noninteractive
+  sudo apt-get update -qq && sudo apt-get install -y -qq git curl ca-certificates
+  if command -v docker >/dev/null 2>&1; then echo "  docker already installed"; else
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh && sudo sh /tmp/get-docker.sh
+  fi
+  sudo usermod -aG docker "$(id -un)"
+  if command -v containerlab >/dev/null 2>&1; then echo "  containerlab already installed"; else
+    curl -sL https://get.containerlab.dev | sudo bash
+  fi
+  if command -v uv >/dev/null 2>&1; then echo "  uv already installed"; else
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  fi
+  printf '\nPrerequisites installed. Log out and in again (docker group), check that ~/.local/bin is in your PATH (uv),\nput the cEOS archive in images/, then: sh install.sh\n'
+  exit 0
+fi
 
 step "0/9 prerequisites"
 MISSING=0
@@ -40,7 +65,7 @@ else
 fi
 MEM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || true)
 if [ -n "$MEM_KB" ] && [ "$MEM_KB" -lt 15000000 ]; then echo "  [..] less than 16 GB of RAM: Infrahub alone wants 8 GB, expect swapping"; fi
-[ "$MISSING" -eq 0 ] || fail "at least one prerequisite is missing: see the [KO] lines above"
+[ "$MISSING" -eq 0 ] || fail "at least one prerequisite is missing: see the [KO] lines above (Ubuntu/Debian: sh install.sh --install-prereqs installs the tools)"
 [ "${1:-}" = "--check-prereqs" ] && { echo "prerequisites ok"; exit 0; }
 
 step "1/9 .env (tokens and secrets kept across runs)"

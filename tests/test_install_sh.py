@@ -30,3 +30,24 @@ def test_install_sh_checks_survive_set_e_and_rerun_after_the_demo():
     assert "--env-file infrahub/.env" in s    # only the three compose secrets reach the containers
     assert "--env-file .env" not in s
     assert "infrahub/.env" in (ROOT / ".gitignore").read_text()
+
+
+def _debian_family() -> bool:
+    try:
+        return any(w in pathlib.Path("/etc/os-release").read_text().lower() for w in ("debian", "ubuntu"))
+    except OSError:
+        return False
+
+
+def test_install_sh_install_prereqs_is_opt_in():
+    s = (ROOT / "install.sh").read_text()
+    assert "--install-prereqs" in s
+    for src in ("get.docker.com", "get.containerlab.dev", "astral.sh/uv/install.sh", "usermod -aG docker"):
+        assert src in s, src
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(ROOT)}
+    r = subprocess.run(["sh", str(ROOT / "install.sh"), "--check-prereqs"], cwd=ROOT, capture_output=True, text=True, env=env)
+    assert "--install-prereqs" in r.stdout + r.stderr   # the check only reports, and names the option
+    if not _debian_family():                            # elsewhere the option refuses instead of guessing
+        r = subprocess.run(["sh", str(ROOT / "install.sh"), "--install-prereqs"], cwd=ROOT, capture_output=True,
+                           text=True, env=env)
+        assert r.returncode == 1 and "Ubuntu" in r.stdout + r.stderr

@@ -23,6 +23,10 @@ the agent deploys what Infrahub rendered and verifies. Companion repository of a
   [arista.com](https://www.arista.com/en/support/software-download). Put the archive in `images/`.
 - An `ANTHROPIC_API_KEY` for the agent.
 
+On Ubuntu or Debian, `sh install.sh --install-prereqs` installs Docker (official `get.docker.com` script), Containerlab
+(`get.containerlab.dev`), uv, git and curl, with `sudo`, and adds you to the `docker` group: log out and in again
+afterwards. It is opt-in because it runs downloaded scripts as root; on another distribution, install them by hand.
+
 ## Install
 
 ```sh
@@ -85,11 +89,16 @@ sh drift.sh --reset      # redeploys both leafs from Infrahub's renderings
 - **`vlanlab/guards.py`**: `DeployGuard`, a steering handler that refuses a missing or unsafe rendering (wrong hostname,
   no management block with the known address, no admin user) and caps deployments at two switches per turn; the reason
   goes back to the model. `ConfirmDeploy`, a hook that runs after the steering and asks you on the terminal, diff shown.
-- **`vlanlab/eos.py`**: Netmiko. Inventory shared with `netmiko-mcp`, `show running-config`, and the atomic
-  replacement through an EOS configuration session (`rollback clean-config`, paste, `commit`, `write memory`).
+- **`vlanlab/eos.py`**: Netmiko. Inventory shared with `netmiko-mcp`, `show running-config`, and the all-or-nothing
+  replacement through an EOS configuration session (`rollback clean-config`, paste, `commit`, `write memory`; the
+  session is aborted if EOS rejects a single line).
 - **`vlanlab/infrahub_api.py`**: reading artifacts with the Infrahub SDK, waiting for them to be ready, and asking a
   read-only repository to import its last commit.
 - **`skills/`**: `infrahub-change`, `deploy-config`, `vlan-check`, the procedures the agent follows.
+- **`clab/vlan-lab.clab.yml`**: the topology. Two cEOS leafs, three links between them so that Ethernet1 to Ethernet3
+  exist, an IPv4-only management network (172.20.20.11 and .12), each leaf booting from the startup-config Infrahub
+  rendered into `clab/generated/`. **`scripts/`**: `wait_artifacts.py` (wait for and download the renderings),
+  `wait_leafs.py` (wait for SSH on the leafs), `reimport.sh` (re-import the repository after a push).
 
 ## Why these choices
 
