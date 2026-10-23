@@ -11,6 +11,7 @@
 # 16 GB of RAM. `sudo` is used for containerlab only. Run from the project directory.
 set -e
 cd "$(dirname "$0")"
+unset DOCKER_DEFAULT_PLATFORM   # the lab runs native; a shell exporting linux/amd64 (common on Macs) would make Docker emulate everything
 REPO_URL_DEFAULT=https://github.com/thomas-rotszyld-nc/blog_networking_agent_strand
 INFRAHUB_COMPOSE_URL=https://infrahub.opsmill.io/1.11.9
 INFRAHUB_ADDR=http://localhost:8000
@@ -108,9 +109,11 @@ until curl -sf "$INFRAHUB_ADDR/api/config" >/dev/null 2>&1; do
 done
 echo "  Infrahub answers at $INFRAHUB_ADDR"
 set -a; . ./.env; set +a   # only now: the lab variables are for infrahubctl, the agent and the MCP servers
+uv sync -q
+uv run infrahubctl info >/dev/null 2>&1 || fail "Infrahub refuses the token of .env. Its database was initialised by an earlier run with another .env (the data volumes outlive the file): either restore that .env, or start Infrahub again from scratch with: sh uninstall.sh --purge && sh install.sh"
+echo "  token accepted"
 
 step "3/9 schema (schema-library copies in infrahub/schema)"
-uv sync -q
 uv run infrahubctl schema load infrahub/schema --wait 60
 
 step "4/9 data (infrahub/objects)"

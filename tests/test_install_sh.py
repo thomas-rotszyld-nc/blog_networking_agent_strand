@@ -51,3 +51,13 @@ def test_install_sh_install_prereqs_is_opt_in():
         r = subprocess.run(["sh", str(ROOT / "install.sh"), "--install-prereqs"], cwd=ROOT, capture_output=True,
                            text=True, env=env)
         assert r.returncode == 1 and "Ubuntu" in r.stdout + r.stderr
+
+
+def test_install_sh_runs_docker_native_and_verifies_the_token_before_loading():
+    s = (ROOT / "install.sh").read_text()
+    assert "unset DOCKER_DEFAULT_PLATFORM" in s            # a Mac shell exporting linux/amd64 would emulate everything
+    i_up = s.index("/api/config")                           # Infrahub answers...
+    i_tok = s.index("infrahubctl info")                     # ...then the token is verified...
+    i_schema = s.index("infrahubctl schema load")           # ...before anything is loaded
+    assert i_up < i_tok < i_schema
+    assert "uninstall.sh --purge" in s                      # the remedy when the data volumes outlived the .env
