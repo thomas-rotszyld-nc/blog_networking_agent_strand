@@ -3,7 +3,8 @@ no aaa root
 !
 username admin privilege 15 role network-admin secret admin
 !
-aaa authorization exec default local
+management api http-commands
+   no shutdown
 !
 no service interface inactive port-id allocation disabled
 !
