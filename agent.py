@@ -4,7 +4,7 @@ Tools come from two MCP servers declared in .mcp.json (the file Claude Code read
 
   infrahub   infrahub-mcp, the official OpsMill server: reads Infrahub, writes on a session branch, opens Proposed Changes
   netmiko    netmiko-mcp, the official Netmiko server, read-only: `show vlan`, `show running-config`
-  preview_config / deploy_config   vlanlab/infrahub_tools.py: diff and deploy the configuration Infrahub rendered
+  render_configs / preview_config / deploy_config   vlanlab/infrahub_tools.py: re-render, diff and deploy Infrahub's configuration
 
 Guards: DeployGuard (steering, refuses unsafe or too many deployments), ConfirmDeploy (asks on the terminal),
 ShowInfrahubLinks (prints the branch and links of what the agent wrote in Infrahub). Skills in skills/.
@@ -26,7 +26,7 @@ from strands.models.anthropic import AnthropicModel
 from strands.tools.mcp import MCPClient
 
 from vlanlab.guards import ConfirmDeploy, DeployGuard
-from vlanlab.infrahub_tools import ShowInfrahubLinks, deploy_config, preview_config
+from vlanlab.infrahub_tools import ShowInfrahubLinks, deploy_config, preview_config, render_configs
 
 SYSTEM_PROMPT = """You are a network automation assistant for a small lab: two Arista leaf switches (leaf1, leaf2) and
 Infrahub as the source of truth. Infrahub generates the complete configuration of each switch from its data.
@@ -72,7 +72,7 @@ def build_agent() -> Agent:
     infrahub = servers[0] if servers else None  # .mcp.json lists infrahub first; the hook only needs call_tool_sync
     base_url = os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000")
     model = AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000)  # ANTHROPIC_API_KEY from the environment
-    return Agent(model=model, tools=[*servers, preview_config, deploy_config], system_prompt=SYSTEM_PROMPT,
+    return Agent(model=model, tools=[*servers, render_configs, preview_config, deploy_config], system_prompt=SYSTEM_PROMPT,
                  callback_handler=chat_handler, context_manager="auto",
                  hooks=[ShowInfrahubLinks(infrahub, base_url), ConfirmDeploy()],
                  plugins=[AgentSkills(skills=["skills"], strict=True), DeployGuard()])

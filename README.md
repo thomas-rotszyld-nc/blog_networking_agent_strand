@@ -15,12 +15,15 @@ the agent deploys what Infrahub rendered and verifies. Companion repository of a
 
 ## Prerequisites
 
-- Linux x86_64 (Ubuntu 22.04 or 24.04), **16 GB of RAM** and 6 cores: the Infrahub Compose stack wants 8 GB on its own,
-  plus two cEOS containers.
+- A Linux machine or VM, x86_64 or arm64, with **12 GB of RAM** (16 GB is comfortable) and 4 cores. Measured at rest with
+  the whole lab up: 7.5 GB for the containers, of which 1.9 GB for Infrahub's Neo4j, 1.5 GB for its server and 1.1 GB
+  per cEOS. On a Mac, see [On a Mac](#on-a-mac).
 - Docker Engine with Compose v2, usable without `sudo` (your user in the `docker` group).
-- [Containerlab](https://containerlab.dev/install/), [uv](https://docs.astral.sh/uv/), `git`, `curl`.
-- An Arista account to download **cEOS-lab** (`cEOS64-lab-<version>.tar.xz`) from
-  [arista.com](https://www.arista.com/en/support/software-download). Put the archive in `images/`.
+- [Containerlab](https://containerlab.dev/install/), [uv](https://docs.astral.sh/uv/), `git`, `curl`. `sudo` is used for
+  Containerlab only.
+- An Arista account to download **cEOS-lab** from [arista.com](https://www.arista.com/en/support/software-download):
+  `cEOS64-lab-<version>.tar.xz` for x86_64, `cEOSarm-lab-<version>.tar.xz` for arm64. Put the archive in `images/`.
+  The template matches what release **4.36.2F** prints; see the note on the template below for other releases.
 - An `ANTHROPIC_API_KEY` for the agent.
 
 On Ubuntu or Debian, `sh install.sh --install-prereqs` installs Docker (official `get.docker.com` script), Containerlab
@@ -41,8 +44,9 @@ sh install.sh            # sh install.sh --check-prereqs to only check the prere
 this repository in Infrahub as a read-only Git repository and wait for the two rendered startup-configs, configure
 `netmiko-mcp`, import the cEOS image and deploy the Containerlab topology from those startup-configs, check that the
 agent sees all its tools, and run end-to-end checks (the last one: each switch's running configuration equals Infrahub's
-rendering). First run: several minutes for Infrahub, one to two for cEOS (exact durations to be measured, see the
-tested-on note below). Then put your key in `.env` (`ANTHROPIC_API_KEY=...`).
+rendering). First run: about 4 GB of images to pull for Infrahub, then roughly five minutes (Infrahub answers in about a
+minute, the renderings follow within seconds, the two cEOS take a little over a minute to boot). A re-run on an installed
+lab takes about half a minute. Then put your key in `.env` (`ANTHROPIC_API_KEY=...`).
 
 ## Run the demo
 
@@ -52,9 +56,7 @@ you> Add VLAN 40 GUESTS to site lab and put Ethernet3 of both leafs on it.
 ```
 
 The terminal prints `[infrahub: …]` lines with the session branch and the link of the Proposed Change. Open it in
-Infrahub (`http://localhost:8000`, admin / infrahub), look at the data diff and the artifact diff, merge. Infrahub
-re-renders the two startup-configs after the merge; `uv run python scripts/wait_artifacts.py leaf1 leaf2 --until-changed`
-waits for them (otherwise the agent may see "no difference" for a moment). Then:
+Infrahub (`http://localhost:8000`, admin / infrahub), look at the data diff and the artifact diff, merge. Then:
 
 ```text
 you> Deploy the configuration of the leafs.
@@ -85,9 +87,10 @@ sh drift.sh --reset      # redeploys both leafs from Infrahub's renderings
   `leafs` group). Loaded by `infrahubctl`, not through the Git repository, so the data loop never waits for a push.
 - **`agent.py`**: the Strands agent. Model, the two MCP servers of `.mcp.json`, the two local tools, hooks, steering
   and skills, plus the terminal chat loop.
-- **`vlanlab/infrahub_tools.py`**: `preview_config` and `deploy_config`, Strands `@tool`s that fetch the artifact from
-  Infrahub and compare it with, or apply it to, the switch. They take no configuration text. `ShowInfrahubLinks`
-  prints the branch and links after each Infrahub write.
+- **`vlanlab/infrahub_tools.py`**: `render_configs`, `preview_config` and `deploy_config`, Strands `@tool`s that ask
+  Infrahub to re-render, fetch the artifact and compare it with, or apply it to, the switch. They take no configuration
+  text. `ShowInfrahubLinks` prints the branch and links after each Infrahub write, and asks Infrahub to render the
+  startup-configs on the session branch once a Proposed Change exists, so the review shows the artifact diff.
 - **`vlanlab/guards.py`**: `DeployGuard`, a steering handler that refuses a missing or unsafe rendering (wrong hostname,
   no management block with the known address, no admin user) and caps deployments at two switches per turn; the reason
   goes back to the model. `ConfirmDeploy`, a hook that runs after the steering and asks you on the terminal, diff shown.
@@ -107,7 +110,10 @@ sh drift.sh --reset      # redeploys both leafs from Infrahub's renderings
 **Infrahub writes go through a branch and a Proposed Change.** `infrahub-mcp` creates a session branch on the agent's
 first write and never touches the default branch; `propose_changes` opens the review. The branch is the safety net, so
 the agent asks for no confirmation before writing to Infrahub: you review in Infrahub, with the rendered configuration
-diff in front of you.
+diff in front of you. One thing learnt on the first live run: Infrahub 1.11 decides by itself which artifacts a change
+impacts, and for these changes (a VLAN added to the site, an interface moved to it) it re-rendered nothing, neither on
+the branch nor on main after the merge. The lab therefore asks explicitly: the hook after `propose_changes` renders the
+branch, and `render_configs` renders main before a deployment.
 
 **`netmiko-mcp` for reads, a custom tool for writes.** [netmiko-mcp](https://github.com/ktbyers/netmiko_mcp) is the
 official MCP server of Netmiko's author. It is read-only by design and enforces a server-side command whitelist
@@ -131,11 +137,21 @@ before `sh install.sh`. A read-only repository does not follow pushes: after pus
 
 To be measured on the first complete run (tokens and price from the Anthropic console) and written here.
 
+## On a Mac
+
+Containerlab needs a Linux kernel, so the lab runs in a Linux VM; Docker Desktop alone is not enough. On Apple Silicon:
+create an Ubuntu arm64 VM with 12 GB or more ([OrbStack](https://orbstack.dev), Lima or UTM), connect to it over SSH,
+clone this repository **inside the VM**, run `sh install.sh --install-prereqs`, log out and in, put the **ARM** cEOS
+archive in `images/`, and run `sh install.sh`. Infrahub is then reachable from the Mac at the VM's address (with OrbStack,
+`http://<vm>.orb.local:8000`). Two traps worth knowing: a Mac shell exporting `DOCKER_DEFAULT_PLATFORM=linux/amd64` must
+not leak into the VM (`install.sh` unsets it), and re-cloning the repository loses `.env` while Infrahub's volumes keep its
+tokens (`install.sh` then tells you to run `sh uninstall.sh --purge`). The author's exact setup is in `docs/dev-macos.md`.
+
 ## Tested on
 
-Developed on an arm64 Linux VM (OrbStack, Apple Silicon) with the ARM build of cEOS-lab; see `docs/dev-macos.md`.
-The x86_64 Linux path above is the documented target and **has not yet been run by the author**. This note goes away
-once it has.
+Ubuntu 26.04 arm64 in an OrbStack VM on Apple Silicon (4 cores, 11.7 GB), Docker 29, Containerlab 0.82, Infrahub 1.11.9,
+cEOS-lab 4.36.2F ARM: `install.sh` passes its nine steps and all end-to-end checks, twice in a row. The x86_64 path is the
+same script with the x86_64 archive and **has not been run by the author yet**.
 
 ## Cleanup
 

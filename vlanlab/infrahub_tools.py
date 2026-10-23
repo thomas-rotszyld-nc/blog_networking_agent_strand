@@ -17,7 +17,7 @@ from strands import tool
 from strands.hooks import AfterToolCallEvent, HookProvider, HookRegistry
 
 from vlanlab.eos import DeployError, load_inventory, replace_config, running_config
-from vlanlab.infrahub_api import ArtifactNotReady, fetch_artifact
+from vlanlab.infrahub_api import ArtifactNotReady, fetch_artifact, generate_artifacts, render_artifacts
 
 PREVIEW_TOOL = "preview_config"
 DEPLOY_TOOL = "deploy_config"
@@ -102,6 +102,22 @@ def preview_config(device: str) -> str:
 
 
 @tool
+def render_configs() -> str:
+    """Asks Infrahub to re-render the startup-configs of all lab switches on main and waits for it (a few seconds).
+
+    Call it once, before preview_config, after a Proposed Change was merged: Infrahub does not re-render main by
+    itself for these changes. Returns, per device, whether the rendering changed.
+    """
+    devices = sorted(load_inventory())
+    try:
+        changed = render_artifacts(devices, branch="main")
+    except Exception as exc:
+        return f"Error: {exc}"
+    return "Infrahub rendered the startup-configs on main. " + ", ".join(
+        f"{d}: {'re-rendered (content changed)' if changed[d] else 'unchanged'}" for d in devices)
+
+
+@tool
 def deploy_config(device: str) -> str:
     """Replace the whole running configuration of a switch with the startup-config Infrahub rendered for it.
 
@@ -159,9 +175,10 @@ class ShowInfrahubLinks(HookProvider):
     server with `get_session_info`. Never raises: a hook failure must not end the agent's turn.
     """
 
-    def __init__(self, infrahub, base_url: str) -> None:
+    def __init__(self, infrahub, base_url: str, generate=generate_artifacts) -> None:
         self.infrahub = infrahub
         self.base_url = base_url.rstrip("/")
+        self.generate = generate  # called with the source branch after propose_changes, so the review has an artifact diff
 
     def register_hooks(self, registry: HookRegistry) -> None:
         registry.add_callback(AfterToolCallEvent, self.show)
@@ -198,8 +215,16 @@ class ShowInfrahubLinks(HookProvider):
             return [f"{payload.get('display_label') or kind} ({kind}) on branch {branch} "
                     f"{self.base_url}/objects/{kind}/{payload['id']}?branch={branch}"]
         if name == "propose_changes" and isinstance(payload, dict) and payload.get("id"):
-            return [f"proposed change {payload.get('source_branch') or ''} -> {payload.get('destination_branch') or 'main'} "
-                    f"{self.base_url}/proposed-changes/{payload['id']}".replace("  ", " ")]
+            lines = [f"proposed change {payload.get('source_branch') or ''} -> {payload.get('destination_branch') or 'main'} "
+                     f"{self.base_url}/proposed-changes/{payload['id']}".replace("  ", " ")]
+            branch = payload.get("source_branch") or self.session_branch()
+            if branch and branch != "?":
+                try:
+                    self.generate(branch)
+                    lines.append(f"rendering the startup-configs on branch {branch}, the artifact diff appears in the proposed change in a few seconds")
+                except Exception as exc:  # the review still works without the diff; say so
+                    lines.append(f"could not ask for the rendering on branch {branch}: {exc}")
+            return lines
         if name == "mutate_graphql":
             ids = _object_ids(payload)
             if ids:

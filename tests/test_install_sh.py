@@ -79,3 +79,7 @@ def test_reimport_waits_for_the_re_rendering():
 def test_install_sh_keeps_mcp_server_noise_out_of_the_tool_check():
     s = (ROOT / "install.sh").read_text()
     assert "vlan-lab-agent.err" in s        # MCP servers chat on stderr at startup; shown only when the check fails
+
+
+def test_install_sh_requires_the_render_tool():
+    assert "render_configs" in (ROOT / "install.sh").read_text()

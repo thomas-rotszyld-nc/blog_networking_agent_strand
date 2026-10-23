@@ -100,3 +100,52 @@ def test_wait_artifacts_fails_fast_when_the_repository_import_failed():
 def test_wait_artifacts_timeout_names_the_repository_status():
     with pytest.raises(TimeoutError, match="syncing"):
         api.wait_artifacts(["leaf1"], timeout=0, client=RepoAwareClient([], {}, "syncing"))
+
+
+def test_generate_artifacts_posts_to_the_generate_endpoint(monkeypatch):
+    # Infrahub does not re-render on a branch by itself for these changes (spike, 2026-10-23): the lab asks for it
+    calls = []
+    c = RepoAwareClient([], {}, "in-sync")
+    c.filters = lambda kind, **kw: [Node(id="def-1")] if kind == "CoreArtifactDefinition" else []
+    monkeypatch.setattr(api, "_post", lambda url, headers: calls.append((url, headers)) or 200)
+    monkeypatch.setenv("INFRAHUB_ADDRESS", "http://ih:8000")
+    monkeypatch.setenv("INFRAHUB_API_TOKEN", "tok")
+    assert api.generate_artifacts("agent/x", client=c) == 200
+    assert calls == [("http://ih:8000/api/artifact/generate/def-1?branch=agent/x", {"X-INFRAHUB-KEY": "tok"})]
+
+
+class RenderClient(RepoAwareClient):
+    """Fake for render_artifacts: artifacts whose checksum changes once the generation tasks have run."""
+
+    def __init__(self):
+        super().__init__([], {}, "in-sync")
+        self.polls = 0
+
+    def filters(self, kind, **kw):
+        if kind == "CoreArtifactDefinition":
+            return [Node(id="def-1")]
+        if kind == "CoreArtifact":
+            tag = "new" if self.polls >= 2 else "old"
+            return [Node(status=Attr("Ready"), storage_id=Attr("s"), checksum=Attr(f"{tag}-{d}"), object=Node(display_label=d))
+                    for d in ("leaf1", "leaf2")]
+        return super().filters(kind, **kw)
+
+    def execute_graphql(self, query, **kw):
+        self.polls += 1
+        tasks = [{"title": "older", "state": "COMPLETED", "created_at": "2026-10-23T10:00:00+00:00", "workflow": "hfid-process"}]
+        if self.polls >= 2:   # after the POST: the trigger task, then one generation task per device, all finished
+            tasks += [{"title": "Trigger Generation of Artifacts", "state": "COMPLETED", "created_at": "2026-10-23T11:00:01+00:00",
+                       "workflow": "request_artifact_definitions_generate"}]
+            tasks += [{"title": "Generate artifact startup-config", "state": "COMPLETED", "created_at": "2026-10-23T11:00:02+00:00",
+                       "workflow": "artifact-generate"} for _ in range(2)]
+        return {"InfrahubTask": {"edges": [{"node": t} for t in tasks]}}
+
+
+def test_render_artifacts_waits_for_the_generation_tasks_and_reports_changes(monkeypatch):
+    posted = []
+    monkeypatch.setattr(api, "_post", lambda url, headers: posted.append(url) or 200)
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    c = RenderClient()
+    assert api.render_artifacts(["leaf1", "leaf2"], branch="main", timeout=5, client=c) == {"leaf1": True, "leaf2": True}
+    assert posted and "/api/artifact/generate/def-1?branch=main" in posted[0]
+    assert c.polls >= 2   # the tasks were read after the POST, not assumed

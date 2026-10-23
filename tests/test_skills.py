@@ -16,7 +16,8 @@ def test_skills_frontmatter_and_tools():
     t = change.read_text()
     assert all(k in t for k in ("mutate_graphql", "get_session_info", "propose_changes", "IpamVLANCreate", "untagged_vlan"))
     t = deploy.read_text()
-    assert all(k in t for k in ("preview_config", "deploy_config")) and "no difference" in t
+    assert all(k in t for k in ("render_configs", "preview_config", "deploy_config")) and "no difference" in t
+    assert t.index("render_configs") < t.index("preview_config(")   # render first: Infrahub does not re-render main by itself
     t = check.read_text()
     assert "send_show_command" in t and "show vlan" in t
 

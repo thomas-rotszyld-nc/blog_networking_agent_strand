@@ -10,6 +10,7 @@ Connection comes from the environment, as for infrahubctl and infrahub-mcp: INFR
 import os
 import time
 
+import httpx
 from infrahub_sdk import Config, InfrahubClientSync
 
 ARTIFACT_DEFINITION = "leaf_startup_config"
@@ -51,6 +52,72 @@ def fetch_artifact(device: str, name: str = "startup-config", branch: str = "mai
             continue
         return c.object_store.get(artifact.storage_id.value)
     raise ArtifactNotReady(device)
+
+
+def _post(url: str, headers: dict[str, str]) -> int:
+    return httpx.post(url, headers=headers, timeout=30).status_code
+
+
+def generate_artifacts(branch: str, definition: str = ARTIFACT_DEFINITION, client=None) -> int:
+    """Asks Infrahub to (re)render the artifacts of `definition` on `branch`; returns the HTTP status (fire-and-forget).
+
+    Infrahub 1.11 decides by itself which artifacts a branch change impacts, and for the changes of this lab (a new
+    VLAN, an interface moved to it) it concluded "no applicable node changes" (spike of 2026-10-23): without this call
+    the Proposed Change shows no artifact diff, and main keeps the old renderings after the merge.
+    """
+    c = client or globals()["client"]()
+    definitions = c.filters(kind="CoreArtifactDefinition", name__value=definition)
+    if not definitions:
+        raise LookupError(f"no artifact definition named {definition!r} in Infrahub")
+    address = os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000").rstrip("/")
+    return _post(f"{address}/api/artifact/generate/{definitions[0].id}?branch={branch}",
+                 {"X-INFRAHUB-KEY": os.environ.get("INFRAHUB_API_TOKEN", "")})
+
+
+TRIGGER_WORKFLOW = "request_artifact_definitions_generate"
+GENERATE_WORKFLOW = "artifact-generate"
+TERMINAL_STATES = ("COMPLETED", "FAILED", "CANCELLED", "CRASHED")
+TASKS_QUERY = """query Tasks($branch: String!, $limit: Int!) {
+  InfrahubTask(branch: $branch, limit: $limit) { edges { node { title state created_at workflow } } } }"""
+
+
+def _tasks(c, branch: str, limit: int = 40) -> list[dict]:
+    data = c.execute_graphql(query=TASKS_QUERY, variables={"branch": branch, "limit": limit})
+    return [edge["node"] for edge in data["InfrahubTask"]["edges"]]
+
+
+def _checksum(c, device: str, branch: str) -> str | None:
+    for artifact in c.filters(kind="CoreArtifact", branch=branch, definition__name__value=ARTIFACT_DEFINITION, include=["object"]):
+        if _target_label(artifact) == device:
+            return getattr(getattr(artifact, "checksum", None), "value", None)
+    return None
+
+
+def render_artifacts(devices: list[str], branch: str = "main", timeout: int = 60, client=None) -> dict[str, bool]:
+    """Asks Infrahub to re-render the startup-configs on `branch` and waits for it; returns {device: content changed}.
+
+    The POST only queues the work (plugin rule: never trust its 200). Completion is read from Infrahub's task log:
+    one trigger task plus one generation task per device, all created after the request and all in a terminal state.
+    """
+    c = client or globals()["client"]()
+    before = {d: _checksum(c, d, branch) for d in devices}
+    watermark = max((t["created_at"] for t in _tasks(c, branch)), default="")
+    generate_artifacts(branch, client=c)
+    deadline = time.monotonic() + timeout
+    while True:
+        new = [t for t in _tasks(c, branch) if t["created_at"] > watermark and t["workflow"] in (TRIGGER_WORKFLOW, GENERATE_WORKFLOW)]
+        failed = [t for t in new if t["state"] in TERMINAL_STATES and t["state"] != "COMPLETED"]
+        if failed:
+            raise RuntimeError(f"Infrahub task failed while rendering: {failed[0]['title']} ({failed[0]['state']})")
+        generations = [t for t in new if t["workflow"] == GENERATE_WORKFLOW]
+        trigger_done = any(t["workflow"] == TRIGGER_WORKFLOW and t["state"] == "COMPLETED" for t in new)
+        if trigger_done and len(generations) >= len(devices) and all(t["state"] == "COMPLETED" for t in generations):
+            break
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Infrahub did not finish rendering on {branch} within {timeout}s "
+                               f"({len(generations)} generation task(s) seen for {len(devices)} device(s))")
+        time.sleep(1)
+    return {d: _checksum(c, d, branch) != before[d] for d in devices}
 
 
 def repository_status(name: str = REPOSITORY_NAME, client=None) -> str | None:

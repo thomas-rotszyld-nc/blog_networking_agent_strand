@@ -75,7 +75,7 @@ def event(name, result, inputs=None):
 
 
 def test_show_links(capsys):
-    hook = it.ShowInfrahubLinks(infrahub=None, base_url="http://localhost:8000")
+    hook = it.ShowInfrahubLinks(infrahub=None, base_url="http://localhost:8000", generate=lambda branch: None)
     hook.session_branch = lambda: "agent/20261022-ab12"
     hook.show(event("node_upsert", {"id": "u1", "display_label": "GUESTS", "branch": "agent/20261022-ab12"}, {"kind": "IpamVLAN"}))
     hook.show(event("propose_changes", {"id": "pc1", "source_branch": "agent/20261022-ab12"}))
@@ -84,7 +84,7 @@ def test_show_links(capsys):
     out = capsys.readouterr().out
     assert "http://localhost:8000/objects/IpamVLAN/u1?branch=agent/20261022-ab12" in out
     assert "http://localhost:8000/proposed-changes/pc1" in out
-    assert "u2" in out and "agent/20261022-ab12" in out and out.count("[infrahub:") == 3
+    assert "u2" in out and "agent/20261022-ab12" in out and out.count("[infrahub:") == 4   # 4th: rendering on the branch
 
 
 def test_show_links_never_raises(capsys):
@@ -93,3 +93,22 @@ def test_show_links_never_raises(capsys):
                               result={"status": "error", "content": [{"text": "boom"}]}))
     hook.show(event("mutate_graphql", "not a dict"))
     hook.show(event("propose_changes", {"no_id": True}))
+
+
+def test_show_links_renders_the_branch_after_a_proposed_change(capsys):
+    asked = []
+    hook = it.ShowInfrahubLinks(infrahub=None, base_url="http://localhost:8000", generate=lambda branch: asked.append(branch))
+    hook.show(event("propose_changes", {"id": "pc1", "source_branch": "agent/20261023-ab12", "destination_branch": "main"}))
+    out = capsys.readouterr().out
+    assert asked == ["agent/20261023-ab12"]
+    assert "rendering" in out and "agent/20261023-ab12" in out
+
+
+def test_render_configs_tool_reports_per_device(monkeypatch):
+    monkeypatch.setattr(it, "render_artifacts", lambda devices, **kw: {d: d == "leaf1" for d in devices})
+    monkeypatch.setattr(it, "load_inventory", lambda: {"leaf1": {}, "leaf2": {}})
+    out = it.render_configs()
+    assert "leaf1: re-rendered" in out and "leaf2: unchanged" in out
+    monkeypatch.setattr(it, "render_artifacts", lambda devices, **kw: (_ for _ in ()).throw(TimeoutError("slow")))
+    assert it.render_configs().startswith("Error:")
+    assert it.render_configs.tool_name == "render_configs"
