@@ -7,11 +7,11 @@ the agent deploys what Infrahub rendered and verifies. Companion repository of a
 
 **The loop the article follows: intent → review → render → deploy → verify.**
 
-| Act | You ask | What happens |
-|-----|---------|--------------|
-| 1 | *Add VLAN 40 GUESTS to site lab and put Ethernet3 of both leafs on it.* | The agent writes in Infrahub through the official `infrahub-mcp` server, on a session branch, and opens a Proposed Change. You review the data diff and the rendered configuration diff in Infrahub, and merge. |
-| 2 | *Deploy the configuration of the leafs.* | The agent diffs Infrahub's rendering against each switch (`preview_config`), you confirm on the terminal, it replaces the running configuration (`deploy_config`). Guards in code refuse an unsafe rendering or too many switches per turn. |
-| 3 | *Check the VLANs on both leafs.* then `sh drift.sh`, *Is leaf2 still compliant? Fix it.* | `show vlan` through the official, read-only `netmiko-mcp` server. After a manual change on leaf2, the preview shows the drift and the same deployment fixes it. |
+| Act | Goal | You ask | What happens |
+|-----|------|---------|--------------|
+| 1 | Change the intent in the source of truth, never on a switch, and have a human review it before anything else happens. | *Add VLAN 40 GUESTS to site lab and put Ethernet3 of both leafs on it.* | The agent writes in Infrahub through the official `infrahub-mcp` server, on a session branch, and opens a Proposed Change. You review the data diff and the rendered configuration diff in Infrahub, and merge. |
+| 2 | Deploy only what Infrahub rendered, after a preview, a confirmation and guards the model cannot talk around. | *Deploy the configuration of the leafs.* | The agent diffs Infrahub's rendering against each switch (`preview_config`), you confirm on the terminal, it replaces the running configuration (`deploy_config`). Guards in code refuse an unsafe rendering or too many switches per turn. |
+| 3 | Verify the switches against the intent, detect a manual change, and remediate with the same deployment path. | *Check the VLANs on both leafs.* then `sh drift.sh`, *Is leaf2 still compliant? Fix it.* | `show vlan` through the official, read-only `netmiko-mcp` server. After a manual change on leaf2, the preview shows the drift and the same deployment fixes it. |
 
 ## Prerequisites
 
