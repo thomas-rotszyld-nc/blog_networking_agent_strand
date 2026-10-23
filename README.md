@@ -57,11 +57,11 @@ exported variable, and is not committed).
 `anthropic`) changes it. One default model per provider, all three at about the price of Claude Opus 5.5; `MODEL_ID` in
 `.env` replaces it with any other model of the same provider.
 
-| `MODEL_PROVIDER` | Default model | Key to export | List price, input / output per million tokens |
-|---|---|---|---|
-| `anthropic` (default) | `claude-opus-5-5` | `ANTHROPIC_API_KEY` | $4 / $20 |
-| `openai` | `gpt-6.1-sol` | `OPENAI_API_KEY` | $2 / $10 |
-| `gemini` | `gemini-4-argon` | `GEMINI_API_KEY` | $2 / $10 until 30 November 2026, then $4 / $20 |
+| `MODEL_PROVIDER` | Default model | Key to export |
+|---|---|---|
+| `anthropic` (default) | `claude-opus-5-5` | `ANTHROPIC_API_KEY` |
+| `openai` | `gpt-6.1-sol` | `OPENAI_API_KEY` |
+| `gemini` | `gemini-4-argon` | `GEMINI_API_KEY` |
 
 The demo transcript, the cost table below and the prompt-cache figures were measured with Anthropic; the agent prints
 the token count of every turn whichever provider runs it. Strands ships more providers (Bedrock, Mistral, Ollama,
