@@ -98,14 +98,15 @@ def chat(agent: Agent) -> None:
             continue
         print("agent> ", end="", flush=True)
         result = agent(question)
-        print(usage_line(result), file=sys.stderr)
+        print(usage_line(result, "usage, session total"), file=sys.stderr)
 
 
-def usage_line(result) -> str:
-    """Token count of a run, for the cost section of the README. Anthropic bills the three kinds of input tokens
-    differently: uncached, read from the cache, written to the cache."""
+def usage_line(result, label: str = "usage") -> str:
+    """Token count, for the cost section of the README. Anthropic bills the three kinds of input tokens differently:
+    uncached, read from the cache, written to the cache. Strands accumulates the counters over the agent's life, so in
+    the chat the line is the session total."""
     u = result.metrics.accumulated_usage
-    return (f"[usage: input tokens {u.get('inputTokens', 0)} uncached + {u.get('cacheReadInputTokens', 0)} cache read"
+    return (f"[{label}: input tokens {u.get('inputTokens', 0)} uncached + {u.get('cacheReadInputTokens', 0)} cache read"
             f" + {u.get('cacheWriteInputTokens', 0)} cache write, output tokens {u.get('outputTokens', 0)}]")
 
 

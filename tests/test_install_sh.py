@@ -90,3 +90,12 @@ def test_install_sh_accepts_the_anthropic_key_from_the_shell():
     script = (ROOT / "install.sh").read_text()
     assert '[ -n "${ANTHROPIC_API_KEY:-}" ]' in script
     assert "export ANTHROPIC_API_KEY" in script
+
+
+def test_install_sh_re_renders_main_after_loading_the_objects():
+    """A re-run reloads the seed objects (Ethernet3 back on IOT) but Infrahub re-renders nothing by itself: without an
+    explicit rendering, clab/generated and the leafs would follow stale artifacts that no longer match the data."""
+    script = (ROOT / "install.sh").read_text()
+    step5 = script[script.index('step "5/9'):script.index('step "6/9')]
+    assert "render_artifacts" in step5
+    assert step5.index("render_artifacts") < step5.index("--out clab/generated")   # rendered first, then downloaded

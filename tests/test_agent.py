@@ -79,4 +79,5 @@ def test_chat_prints_the_usage_line_after_each_turn(monkeypatch, capsys):
     answers = iter(["hello", ""])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     agent.chat(FakeAgent())
-    assert "[usage: input tokens 5 uncached + 11 cache read + 0 cache write, output tokens 7]" in capsys.readouterr().err
+    # Strands' accumulated_usage covers every invocation of the agent, so the chat says so
+    assert "[usage, session total: input tokens 5 uncached + 11 cache read + 0 cache write, output tokens 7]" in capsys.readouterr().err

@@ -126,6 +126,9 @@ else
   uv run infrahubctl repository add blog-lab "$REPO_URL" --read-only --ref "$REPO_REF"
   echo "  repository blog-lab registered ($REPO_URL @ $REPO_REF)"
 fi
+uv run python scripts/wait_artifacts.py leaf1 leaf2 --timeout 600
+# Infrahub re-renders nothing by itself: after the objects were (re)loaded, ask for the rendering of main, then download
+uv run python -c "from vlanlab.infrahub_api import render_artifacts; render_artifacts(['leaf1', 'leaf2'])"
 uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated --timeout 600
 
 step "6/9 netmiko-mcp (read-only, allowed commands: show vlan, show running-config)"
