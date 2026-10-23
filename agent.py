@@ -97,7 +97,8 @@ def chat(agent: Agent) -> None:
             print("conversation cleared")
             continue
         print("agent> ", end="", flush=True)
-        agent(question)
+        result = agent(question)
+        print(usage_line(result), file=sys.stderr)
 
 
 def usage_line(result) -> str:

@@ -58,3 +58,25 @@ def test_usage_line_sums_the_tokens_of_a_result():
 
     # Anthropic counts the three input kinds separately: uncached, read from the cache, written to the cache
     assert agent.usage_line(Result()) == "[usage: input tokens 1200 uncached + 900 cache read + 300 cache write, output tokens 340]"
+
+
+def test_chat_prints_the_usage_line_after_each_turn(monkeypatch, capsys):
+    """The interactive loop reports tokens too, so the cost of a whole demo session can be added up."""
+    import agent
+
+    class Metrics:
+        accumulated_usage = {"inputTokens": 5, "outputTokens": 7, "cacheReadInputTokens": 11, "cacheWriteInputTokens": 0}
+
+    class Result:
+        metrics = Metrics()
+
+    class FakeAgent:
+        messages = []
+
+        def __call__(self, question):
+            return Result()
+
+    answers = iter(["hello", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    agent.chat(FakeAgent())
+    assert "[usage: input tokens 5 uncached + 11 cache read + 0 cache write, output tokens 7]" in capsys.readouterr().err
