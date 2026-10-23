@@ -1,0 +1,271 @@
+Demo transcript, 2026-10-23, Ubuntu 26.04 arm64 VM (OrbStack, Apple Silicon), Infrahub 1.11.9, cEOS-lab 4.36.2F,
+Strands agent on claude-opus-5-5 with prompt caching. Captured from `uv run python agent.py` with the questions fed on
+stdin (so the typed questions are re-inserted after each `you>`), stderr included (the `[usage ...]` lines). Between
+session 1 and session 2 the Proposed Change was reviewed and merged in Infrahub: its "Artifacts" tab showed both
+startup-configs as "updated". The "Confirm? [y/N]" prompts were answered y.
+
+======================================================================
+Session 1, act 1: the intent change
+$ uv run python agent.py
+Infrahub lab agent. One question per turn; empty line, exit, quit or Ctrl-D to leave; /reset to forget the conversation.
+
+you> Add VLAN 40 GUESTS to site lab and put Ethernet3 of both leafs on it.
+agent> 
+  [tool: skills]
+
+  [tool: get_nodes]
+
+  [tool: get_nodes]
+
+  [tool: query_graphql]
+Note: Ethernet3 on both leafs is currently on VLAN 30 IOT; it will move to GUESTS.
+  [tool: mutate_graphql]
+  [infrahub: mutation wrote object 18e129b3-9585-320f-36bf-c51b0471c675 on branch agent/20261023-0cef6f27 http://localhost:8000/objects/CoreNode/18e129b3-9585-320f-36bf-c51b0471c675?branch=agent/20261023-0cef6f27]
+
+  [tool: mutate_graphql]
+
+  [tool: get_session_info]
+  [infrahub: mutation wrote object 18e12204-01a7-3886-36bf-c51359d965ce on branch agent/20261023-0cef6f27 http://localhost:8000/objects/CoreNode/18e12204-01a7-3886-36bf-c51359d965ce?branch=agent/20261023-0cef6f27]
+  [infrahub: mutation wrote object 18e12204-1946-afcd-36b8-c5113b0698c4 on branch agent/20261023-0cef6f27 http://localhost:8000/objects/CoreNode/18e12204-1946-afcd-36b8-c5113b0698c4?branch=agent/20261023-0cef6f27]
+
+  [tool: query_graphql]
+
+  [tool: propose_changes]
+  [infrahub: proposed change agent/20261023-0cef6f27 -> main http://localhost:8000/proposed-changes/18e129b5-469a-2518-36be-c5186526d6f9]
+  [infrahub: rendering the startup-configs on branch agent/20261023-0cef6f27, the artifact diff appears in the proposed change in a few seconds]
+I made the change on my session branch **`agent/20261023-0cef6f27`**. That write created the branch.
+
+**Changes:**
+- **New VLAN:** VLAN 40 **GUESTS** (active, role user) in group `lab-vlans` (site lab).
+- **leaf1 Ethernet3:** access port on GUESTS, with the description "access port VLAN 40".
+- **leaf2 Ethernet3:** same as leaf1.
+
+⚠️ Both Ethernet3 ports were access ports on **VLAN 30 IOT**. They are moving to GUESTS, so anything plugged into them will leave IOT.
+
+I checked the branch and all three changes are there as described.
+
+**Proposed change opened:** "Add VLAN 40 GUESTS and move Ethernet3 of leaf1/leaf2 to it" (id `18e129b5-469a-2518-36be-c5186526d6f9`), from this branch into `main`. The link is printed on the terminal. In Infrahub you can review the data changes and how the configs for leaf1 and leaf2 will change.
+
+Nothing has been sent to the switches. Once the proposed change is merged, ask me to deploy and I'll show you the diff for each switch before anything is applied.
+[usage, session total: input tokens 16 uncached + 84621 cache read + 4312 cache write, output tokens 1680]
+
+======================================================================
+(Proposed Change reviewed and merged in Infrahub: data diff + artifact diff of leaf1 and leaf2)
+
+Session 2, acts 2 and 3: deploy, then verify
+$ uv run python agent.py
+Infrahub lab agent. One question per turn; empty line, exit, quit or Ctrl-D to leave; /reset to forget the conversation.
+
+you> Deploy the configuration of the leafs.
+agent> 
+  [tool: skills]
+
+  [tool: render_configs]
+
+  [tool: preview_config]
+
+  [tool: preview_config]
+Both leafs have the same difference:
+- **Ethernet3** moves from VLAN 30 (IOT) to VLAN 40, and its description changes to match.
+- **VLAN 40 "GUESTS"** is added. VLAN 30 stays defined.
+  [tool: deploy_config]
+
+  [tool: deploy_config]
+
+  DEPLOY leaf1: replace the running configuration with Infrahub's rendering
+    leaf1: differences (running -> rendered):
+    --- running
+    +++ rendered
+    @@ -7,8 +7,8 @@
+        description access port VLAN 20
+        switchport access vlan 20
+     interface Ethernet3
+    -   description access port VLAN 30
+    -   switchport access vlan 30
+    +   description access port VLAN 40
+    +   switchport access vlan 40
+     interface Management0
+        description management
+        ip address 172.20.20.11/24
+    @@ -30,3 +30,5 @@
+        name VOICE
+     vlan 30
+        name IOT
+    +vlan 40
+    +   name GUESTS
+  Confirm? [y/N] 
+  DEPLOY leaf2: replace the running configuration with Infrahub's rendering
+    leaf2: differences (running -> rendered):
+    --- running
+    +++ rendered
+    @@ -7,8 +7,8 @@
+        description access port VLAN 20
+        switchport access vlan 20
+     interface Ethernet3
+    -   description access port VLAN 30
+    -   switchport access vlan 30
+    +   description access port VLAN 40
+    +   switchport access vlan 40
+     interface Management0
+        description management
+        ip address 172.20.20.12/24
+    @@ -30,3 +30,5 @@
+        name VOICE
+     vlan 30
+        name IOT
+    +vlan 40
+    +   name GUESTS
+  Confirm? [y/N] Both leafs now run the configuration Infrahub generated for them, and it's saved.
+
+| Device | Result |
+|---|---|
+| leaf1 | Configuration replaced and saved (34 lines) |
+| leaf2 | Configuration replaced and saved (34 lines) |
+
+On both switches, Ethernet3 moved from VLAN 30 to the new VLAN 40 "GUESTS". VLAN 30 (IOT) is still defined.
+
+Session logs are in `netmiko/deploy-leaf1.log` and `netmiko/deploy-leaf2.log`.
+
+Should I check the VLANs on the switches to confirm?
+[usage, session total: input tokens 12 uncached + 53610 cache read + 1859 cache write, output tokens 583]
+
+you> Check the VLANs on both leafs.
+agent> 
+  [tool: skills]
+
+  [tool: send_show_command]
+
+  [tool: send_show_command]
+The deployment worked: both leafs have VLAN 40 "GUESTS" with Et3 assigned to it.
+
+**leaf1**
+| VLAN | Name | Status | Interfaces |
+|---|---|---|---|
+| 10 | USERS | active | Et1 |
+| 20 | VOICE | active | Et2 |
+| 30 | IOT | active | — |
+| 40 | GUESTS | active | Et3 |
+
+**leaf2**
+| VLAN | Name | Status | Interfaces |
+|---|---|---|---|
+| 10 | USERS | active | Et1 |
+| 20 | VOICE | active | Et2 |
+| 30 | IOT | active | — |
+| 40 | GUESTS | active | Et3 |
+
+VLAN 30 (IOT) is still defined on both switches, but no ports use it anymore. If you no longer need it, it should be removed in Infrahub first and then deployed again.
+[usage, session total: input tokens 20 uncached + 90228 cache read + 3379 cache write, output tokens 1187]
+
+======================================================================
+Session 3, the drift variant
+$ sh drift.sh
+== drifting leaf2 by hand
+Copy completed successfully.
+
+== leaf1
+VLAN  Name                             Status    Ports                          
+----- -------------------------------- --------- -------------------------------
+1     default                          active                                   
+10    USERS                            active    Et1                            
+20    VOICE                            active    Et2                            
+30    IOT                              active                                   
+40    GUESTS                           active    Et3                            
+
+
+== leaf2
+VLAN  Name                             Status    Ports                          
+----- -------------------------------- --------- -------------------------------
+1     default                          active                                   
+10    USERS                            active    Et1                            
+20    VOIP                             active    Et2                            
+30    IOT                              active                                   
+40    GUESTS                           active    Et3                            
+99    LEGACY                           active                                   
+
+
+leaf2 no longer matches Infrahub. Ask the agent: "Is leaf2 still compliant?" then "Fix it."
+
+$ uv run python agent.py
+Infrahub lab agent. One question per turn; empty line, exit, quit or Ctrl-D to leave; /reset to forget the conversation.
+
+you> Is leaf2 still compliant?
+agent> 
+  [tool: skills]
+
+  [tool: send_show_command]
+
+  [tool: get_nodes]
+
+  [tool: preview_config]
+No, leaf2 is no longer compliant. Its configuration differs from what Infrahub has on record in two places.
+
+| VLAN | On leaf2 | In Infrahub | Status |
+|---|---|---|---|
+| 10 | USERS (Et1) | USERS | ok |
+| 20 | **VOIP** (Et2) | **VOICE** | renamed |
+| 30 | IOT | IOT | ok |
+| 40 | GUESTS (Et3) | GUESTS | ok |
+| 99 | **LEGACY** | — | not in Infrahub |
+
+The preview of the Infrahub configuration against the running one shows the same two changes and nothing else:
+```
+ vlan 20
+-   name VOIP
++   name VOICE
+-vlan 99
+-   name LEGACY
+```
+The interface VLAN assignments match.
+
+**Next step:** deploying the Infrahub configuration would rename VLAN 20 to VOICE and remove VLAN 99. You'd confirm on the terminal before anything is sent.
+
+If VLAN 99 should stay, it has to be added to Infrahub first through a proposed change. Otherwise the deployment will remove it.
+
+Do you want me to deploy?
+[usage, session total: input tokens 8 uncached + 30793 cache read + 2136 cache write, output tokens 801]
+
+you> Fix leaf2.
+agent> 
+
+  [tool: skills]
+
+  [tool: render_configs]
+
+  [tool: preview_config]
+The diff hasn't changed: VLAN 20 gets renamed from VOIP to VOICE, and VLAN 99 (LEGACY) gets removed. Deploying now. Please confirm on the terminal.
+  [tool: deploy_config]
+
+  DEPLOY leaf2: replace the running configuration with Infrahub's rendering
+    leaf2: differences (running -> rendered):
+    --- running
+    +++ rendered
+    @@ -27,10 +27,8 @@
+     vlan 10
+        name USERS
+     vlan 20
+    -   name VOIP
+    +   name VOICE
+     vlan 30
+        name IOT
+     vlan 40
+        name GUESTS
+    -vlan 99
+    -   name LEGACY
+  Confirm? [y/N] leaf2 is fixed. I replaced its running configuration with the one Infrahub generated and saved it (34 lines, log in `netmiko/deploy-leaf2.log`). VLAN 20 is now named VOICE and VLAN 99 (LEGACY) has been removed.
+
+Before deploying, I asked Infrahub to regenerate the configuration. It hadn't changed, so the diff was exactly what I showed you before.
+
+Do you want me to run `show vlan` on leaf2 to confirm it now matches Infrahub?
+[usage, session total: input tokens 20 uncached + 96280 cache read + 3831 cache write, output tokens 1284]
+
+======================================================================
+Cost (claude-opus-5-5 list prices: $4 per million uncached input tokens, $0.20 cache read, $5 cache write, $20 output)
+
+  session                     uncached   cache read   cache write   output     cost
+  1  act 1                          16       84,621         4,312    1,680   $0.072
+  2  acts 2 + 3                     20       90,228         3,379    1,187   $0.059
+  3  drift: question + fix          20       96,280         3,831    1,284   $0.064
+  whole demo                                                                 $0.195
+
+Before prompt caching was enabled, act 1 alone read 89,334 uncached input tokens: about $0.39.

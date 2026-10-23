@@ -5,8 +5,8 @@ VM. Nothing in the repository depends on OrbStack; it is just the VM used by the
 
 ## VM
 
-1. OrbStack (or Lima, Multipass, UTM): create an **Ubuntu 24.04 arm64** VM with **16 GB of RAM and 6 CPUs**. Infrahub
-   alone wants 8 GB.
+1. OrbStack (or Lima, Multipass, UTM): create an **Ubuntu arm64** VM (24.04 or 26.04) with **12 GB of RAM and 4 CPUs**
+   (the author's: 4 CPUs, 11.7 GB; the containers take about 7.5 GB at rest).
 2. Inside the VM: Docker Engine (user in the `docker` group), Containerlab, uv, git, curl. The OrbStack Ubuntu image
    ships none of them: `sh install.sh --install-prereqs` installs all five, then log out and in again.
 3. Clone the repository inside the VM (not on a macOS mount: Docker volumes and Containerlab binds behave better).
@@ -39,5 +39,8 @@ Two traps met on the first run:
 
 ## Limits met with the ARM image
 
-To be filled during the first complete run: boot time, missing features, error messages, and the workaround used for
-each. Readers on x86_64 should not mistake them for bugs of this repository.
+None specific to ARM in the end. cEOSarm-lab 4.36.2F boots in a little over a minute, answers SSH, `show vlan`,
+`show running-config`, configuration sessions and `write memory` exactly as the lab expects. The only adjustments were
+release-specific, not architecture-specific: the default lines 4.36 prints in `show running-config` (now in the template)
+and `aaa authorization exec default local`, without which the admin user lands unprivileged over SSH. Readers on x86_64
+with another release should expect the same kind of difference, which `preview_config` shows as a diff.

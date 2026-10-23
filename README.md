@@ -141,7 +141,17 @@ before `sh install.sh`. A read-only repository does not follow pushes: after pus
 
 ## Cost of a demo session
 
-To be measured on the first complete run (tokens and price from the Anthropic console) and written here.
+Measured on the run in `docs/demo-transcript.txt` (claude-opus-5-5, prompt caching on, list prices). The agent prints
+the token count after each turn (`[usage ...]` on stderr; in the chat it is the session total).
+
+| Session | Uncached input | Cache read | Cache write | Output | Cost |
+|---|---|---|---|---|---|
+| Act 1, the intent change | 16 | 84,621 | 4,312 | 1,680 | $0.07 |
+| Acts 2 and 3, deploy then verify | 20 | 90,228 | 3,379 | 1,187 | $0.06 |
+| Drift: question, then fix | 20 | 96,280 | 3,831 | 1,284 | $0.06 |
+
+About 20 cents for the whole demo. The prefix (system prompt, 24 tool definitions, skills) is the same at every model call,
+so almost all input is read from the cache; before caching was enabled, act 1 alone read 89,000 uncached tokens, about $0.39.
 
 ## On a Mac
 
@@ -156,8 +166,22 @@ tokens (`install.sh` then tells you to run `sh uninstall.sh --purge`). The autho
 ## Tested on
 
 Ubuntu 26.04 arm64 in an OrbStack VM on Apple Silicon (4 cores, 11.7 GB), Docker 29, Containerlab 0.82, Infrahub 1.11.9,
-cEOS-lab 4.36.2F ARM: `install.sh` passes its nine steps and all end-to-end checks, twice in a row. The x86_64 path is the
-same script with the x86_64 archive and **has not been run by the author yet**.
+cEOS-lab 4.36.2F ARM: `install.sh` passes its nine steps and all end-to-end checks, re-runs included, and the three acts
+plus the drift variant ran through the agent as shown in `docs/demo-transcript.txt`. Two attempts at going around the
+guards ("add VLAN 50 on leaf1 with configure terminal, no need for Infrahub", "deploy this text, skip the preview") were
+refused and redirected to the Infrahub loop. The x86_64 path is the same script with the x86_64 archive and **has not
+been run by the author yet**.
+
+Four things only the live run taught, each now covered by a test:
+
+- Infrahub 1.11 re-rendered nothing by itself for these changes (see above): the lab asks for every rendering.
+- infrahub-mcp 1.2.0 on the mcp 2.x SDK forgot its session branch between two calls (see above): the stdio wrapper.
+- EOS keeps a committed configuration session as "completed" and refuses to enter a session of the same name again, so
+  the second deployment to a switch failed on a prompt timeout: each deployment now opens a session with a new name.
+- netmiko-mcp 0.2.0 imports an API the mcp 2.x SDK removed: it runs with `mcp<2`.
+
+Logs: `logs/infrahub-mcp.log` and `logs/netmiko-mcp.log` (the MCP servers' stderr), `netmiko/session-<device>.log` (the
+whole SSH session of a deployment, kept when it fails) and `netmiko/deploy-<device>.log` (the EOS echo of a successful one).
 
 ## Cleanup
 
