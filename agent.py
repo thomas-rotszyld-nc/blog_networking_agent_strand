@@ -15,10 +15,13 @@ ShowInfrahubLinks (prints the branch and links of what the agent wrote in Infrah
 
 In the chat, an empty line, "exit", "quit" or Ctrl-D ends the session; "/reset" clears the conversation.
 Environment: ANTHROPIC_API_KEY (export it in your shell, or put it in .env), INFRAHUB_ADDRESS, INFRAHUB_API_TOKEN
-(install.sh writes the last two to .env; .env never overrides a variable already exported).
+(install.sh writes the last two to .env; .env never overrides a variable already exported). The MCP servers see only .env:
+the MCP SDK starts a stdio server with six variables of the environment (HOME, PATH...), so .mcp.json loads .env itself.
+When a server fails to start, its stderr in logs/ says why; the agent quotes it and exits.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -39,6 +42,9 @@ rendered and nothing else: never send configuration lines yourself, never compos
 Before any deployment, run preview_config and show the user what changes; the user confirms on the terminal.
 When a request matches one of the available skills, activate it with the skills tool and follow its procedure.
 Be concise, answer in the user's language, and report refusals or errors as they are."""
+
+
+LOGS = Path("logs")   # where .mcp.json sends the servers' stderr: logs/<server>-mcp.log
 
 
 def load_dotenv(path: Path = Path(".env")) -> None:
@@ -69,6 +75,24 @@ def chat_handler(**kwargs) -> None:
 chat_handler.last_tool = None  # toolUseId of the last tool call shown
 
 
+def mcp_log_offsets() -> dict[Path, int]:
+    """Size of each server log before the servers start: what follows is this run's."""
+    return {log: log.stat().st_size for log in LOGS.glob("*-mcp.log")}
+
+
+def mcp_startup_error(offsets: dict[Path, int]) -> str:
+    """Why a server did not start. Strands reports 'unhandled errors in a TaskGroup' and hides the cause, which is the
+    last exception the server wrote on stderr since the agent started (earlier runs leave their own errors in the file)."""
+    found = []
+    for log in sorted(LOGS.glob("*-mcp.log")):
+        new_lines = log.read_text(errors="replace")[offsets.get(log, 0):].splitlines()
+        errors = [line for line in new_lines if re.match(r"\w*(Error|Exception)\b", line)]
+        if errors:
+            found.append(f"  {log}: {errors[-1]}")
+    detail = "\n".join(found) or f"  nothing new in {LOGS}/*-mcp.log: run the server's command of .mcp.json by hand to see it fail"
+    return f"an MCP server of .mcp.json did not start; its stderr is in {LOGS}/:\n{detail}"
+
+
 def build_agent() -> Agent:
     """The agent: Anthropic model, the two MCP servers of .mcp.json, the two local tools, hooks, steering and skills."""
     servers = MCPClient.load_servers(".mcp.json")
@@ -76,10 +100,16 @@ def build_agent() -> Agent:
     base_url = os.environ.get("INFRAHUB_ADDRESS", "http://localhost:8000")
     model = AnthropicModel(model_id="claude-opus-5-5", max_tokens=16000,  # ANTHROPIC_API_KEY from the environment
                            cache_config=CacheConfig(ttl="5m", system_prompt_ttl=True, tools_ttl=True))  # the prefix is the same every turn
-    return Agent(model=model, tools=[*servers, render_configs, preview_config, deploy_config], system_prompt=SYSTEM_PROMPT,
-                 callback_handler=chat_handler, context_manager="auto",
-                 hooks=[ShowInfrahubLinks(infrahub, base_url), ConfirmDeploy()],
-                 plugins=[AgentSkills(skills=["skills"], strict=True), DeployGuard()])
+    offsets = mcp_log_offsets()
+    try:
+        return Agent(model=model, tools=[*servers, render_configs, preview_config, deploy_config], system_prompt=SYSTEM_PROMPT,
+                     callback_handler=chat_handler, context_manager="auto",
+                     hooks=[ShowInfrahubLinks(infrahub, base_url), ConfirmDeploy()],
+                     plugins=[AgentSkills(skills=["skills"], strict=True), DeployGuard()])
+    except ValueError as e:   # Agent() starts the MCP servers: a server that dies at start surfaces here, cause hidden
+        if "Failed to start MCP client" not in str(e):
+            raise
+        raise SystemExit(f"{mcp_startup_error(offsets)}\n({e})") from None
 
 
 def chat(agent: Agent) -> None:

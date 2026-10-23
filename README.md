@@ -182,6 +182,8 @@ Four things only the live run taught, each now covered by a test:
 
 Logs: `logs/infrahub-mcp.log` and `logs/netmiko-mcp.log` (the MCP servers' stderr), `netmiko/session-<device>.log` (the
 whole SSH session of a deployment, kept when it fails) and `netmiko/deploy-<device>.log` (the EOS echo of a successful one).
+When an MCP server does not start, the agent quotes the last error of its log and exits: the MCP SDK starts a server with
+six variables of the environment, so the servers see `.env` and nothing you export in the shell.
 
 ## Cleanup
 

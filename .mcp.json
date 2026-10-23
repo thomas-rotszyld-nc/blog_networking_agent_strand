@@ -2,7 +2,7 @@
   "mcpServers": {
     "infrahub": {
       "command": "sh",
-      "args": ["-c", "set -a; . ./.env; INFRAHUB_MCP_BRANCH_PATTERN='agent/{date}-{hex}' INFRAHUB_MCP_LOG_LEVEL=warning exec uvx --from infrahub-mcp==1.2.0 python scripts/infrahub_mcp_stdio.py 2>>logs/infrahub-mcp.log"]
+      "args": ["-c", "set -a; . ./.env; INFRAHUB_ADDRESS=${INFRAHUB_ADDRESS:-http://localhost:8000} INFRAHUB_MCP_BRANCH_PATTERN='agent/{date}-{hex}' INFRAHUB_MCP_LOG_LEVEL=warning exec uvx --from infrahub-mcp==1.2.0 python scripts/infrahub_mcp_stdio.py 2>>logs/infrahub-mcp.log"]
     },
     "netmiko": {
       "command": "sh",

@@ -13,6 +13,9 @@ def test_mcp_json():
     assert "infrahub-mcp==1.2.0" in infrahub and "agent/{date}-{hex}" in infrahub
     assert "python scripts/infrahub_mcp_stdio.py" in infrahub
     assert "INFRAHUB_MCP_LOG_LEVEL=warning" in infrahub   # its info/debug logs otherwise flood the terminal
+    # the MCP SDK hands a stdio server six variables of the environment (HOME, PATH...), so the servers see .env and nothing
+    # else; a .env without INFRAHUB_ADDRESS must still start the server, with the default agent.py and vlanlab already use
+    assert ". ./.env; INFRAHUB_ADDRESS=${INFRAHUB_ADDRESS:-http://localhost:8000}" in infrahub
     netmiko = " ".join(cfg["netmiko"]["args"])
     assert "netmiko-mcp==0.2.0" in netmiko and "netmiko/netmiko-mcp.yml" in netmiko
     # both servers write banners, SSH chatter and validation warnings on stderr, which would land in the chat terminal
@@ -94,3 +97,56 @@ def test_load_dotenv_skips_empty_values(monkeypatch, tmp_path):
     monkeypatch.setenv("INFRAHUB_ADDRESS", "placeholder"); monkeypatch.delenv("INFRAHUB_ADDRESS")   # restored after the test
     agent.load_dotenv(env)
     assert "ANTHROPIC_API_KEY" not in os.environ and os.environ["INFRAHUB_ADDRESS"] == "http://x:8000"
+
+
+def test_mcp_startup_error_quotes_what_the_server_wrote_since_the_start(tmp_path, monkeypatch):
+    """Strands hides the cause of a server start failure behind 'unhandled errors in a TaskGroup'; the cause is the last
+    exception the server wrote on stderr, in logs/, after the agent started (earlier runs leave their own errors there)."""
+    import agent
+
+    logs = tmp_path / "logs"; logs.mkdir()
+    monkeypatch.setattr(agent, "LOGS", logs)
+    (logs / "infrahub-mcp.log").write_text("Traceback (most recent call last):\nRuntimeError: stale error of an earlier run\n")
+    offsets = agent.mcp_log_offsets()
+    with (logs / "infrahub-mcp.log").open("a") as f:
+        f.write("Traceback (most recent call last):\n  File x\nRuntimeError: INFRAHUB_ADDRESS is required. Set it.\n")
+    (logs / "netmiko-mcp.log").write_text("INFO Processing request\n")   # created after the start, no error
+    msg = agent.mcp_startup_error(offsets)
+    assert "RuntimeError: INFRAHUB_ADDRESS is required. Set it." in msg and "stale" not in msg
+    assert "infrahub-mcp.log" in msg and "netmiko-mcp.log" not in msg and ".mcp.json" in msg
+
+
+def test_mcp_startup_error_without_a_new_error_says_so(tmp_path, monkeypatch):
+    import agent
+
+    logs = tmp_path / "logs"; logs.mkdir()
+    monkeypatch.setattr(agent, "LOGS", logs)
+    msg = agent.mcp_startup_error(agent.mcp_log_offsets())
+    assert "nothing new" in msg and ".mcp.json" in msg
+
+
+def test_build_agent_turns_a_server_start_failure_into_a_readable_exit(monkeypatch, tmp_path):
+    import pytest
+
+    import agent
+
+    logs = tmp_path / "logs"; logs.mkdir()
+    monkeypatch.setattr(agent, "LOGS", logs)
+    monkeypatch.setattr(agent.MCPClient, "load_servers", classmethod(lambda cls, cfg: []))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+
+    def failing_agent(*args, **kwargs):
+        (logs / "infrahub-mcp.log").write_text("RuntimeError: Authentication required. Set INFRAHUB_API_TOKEN\n")
+        raise ValueError("Failed to load tool <MCPClient>: Failed to start MCP client: unhandled errors in a TaskGroup (1 sub-exception)")
+
+    monkeypatch.setattr(agent, "Agent", failing_agent)
+    with pytest.raises(SystemExit) as exc:
+        agent.build_agent()
+    assert "Authentication required" in str(exc.value) and "logs/" in str(exc.value)
+
+    def other_failure(*args, **kwargs):
+        raise ValueError("something else")
+
+    monkeypatch.setattr(agent, "Agent", other_failure)
+    with pytest.raises(ValueError, match="something else"):   # only server start failures are translated
+        agent.build_agent()
