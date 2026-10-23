@@ -53,9 +53,18 @@ def fetch_artifact(device: str, name: str = "startup-config", branch: str = "mai
     raise ArtifactNotReady(device)
 
 
-def wait_artifacts(devices: list[str], timeout: int = 600, client=None, previous: dict[str, str] | None = None) -> dict[str, str]:
-    """Polls until every device has a ready artifact; returns {device: content}. TimeoutError names the missing ones.
+def repository_status(name: str = REPOSITORY_NAME, client=None) -> str | None:
+    """sync_status of the read-only repository (in-sync, syncing, error-import, ...), or None when it is not registered."""
+    c = client or globals()["client"]()
+    repos = c.filters(kind="CoreReadOnlyRepository", name__value=name)
+    return repos[0].sync_status.value if repos else None
 
+
+def wait_artifacts(devices: list[str], timeout: int = 600, client=None, previous: dict[str, str] | None = None) -> dict[str, str]:
+    """Polls until every device has a ready artifact; returns {device: content}.
+
+    Fails fast with RuntimeError when the repository import failed (sync_status error-import: nothing will ever be
+    rendered, typically a ref without .infrahub.yml); the TimeoutError names the missing devices and the sync_status.
     With `previous` ({device: content seen before}), an artifact still equal to its previous content does not count:
     right after a merge, Infrahub's artifact stays Ready with the old body until the worker re-renders it.
     """
@@ -74,9 +83,14 @@ def wait_artifacts(devices: list[str], timeout: int = 600, client=None, previous
                 contents[device] = content
         if len(contents) == len(devices):
             return contents
+        status = repository_status(client=c)
+        if status == "error-import":
+            raise RuntimeError(f"repository {REPOSITORY_NAME!r} failed to import (sync_status error-import): does the ref "
+                               f"of INFRAHUB_REPO_REF carry .infrahub.yml? Details: docker compose -p vlan-lab logs task-worker")
         if time.monotonic() >= deadline:
             missing = [d for d in devices if d not in contents]
-            raise TimeoutError(f"no ready artifact for {', '.join(missing)} after {timeout}s")
+            raise TimeoutError(f"no ready artifact for {', '.join(missing)} after {timeout}s "
+                               f"(repository sync_status: {status or 'not registered'})")
         time.sleep(POLL_SECONDS)
 
 

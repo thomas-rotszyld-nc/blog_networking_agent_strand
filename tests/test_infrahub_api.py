@@ -28,6 +28,8 @@ class FakeClient:
 
     def filters(self, kind, **kw):
         self.calls.append((kind, kw))
+        if kind == "CoreReadOnlyRepository":   # the plain fake has no repository registered
+            return []
         return self.artifacts
 
     def execute_graphql(self, query, **kw):
@@ -75,3 +77,26 @@ def test_wait_artifacts_can_wait_for_a_change(monkeypatch):
         api.wait_artifacts(["leaf1"], timeout=0, client=same, previous={"leaf1": "hostname leaf1\n"})
     changed = FakeClient([ready("leaf1", "s2")], {"s2": "hostname leaf1\nvlan 40\n"})
     assert api.wait_artifacts(["leaf1"], timeout=0, client=changed, previous={"leaf1": "hostname leaf1\n"}) == {"leaf1": "hostname leaf1\nvlan 40\n"}
+
+
+class RepoAwareClient(FakeClient):
+    """FakeClient that also answers for the read-only repository, with the given sync_status."""
+
+    def __init__(self, artifacts, blobs, repo_status):
+        super().__init__(artifacts, blobs)
+        self.repo_status = repo_status
+
+    def filters(self, kind, **kw):
+        if kind == "CoreReadOnlyRepository":
+            return [Node(id="r1", sync_status=Attr(self.repo_status), ref=Attr("main"), commit=Attr("abc1234"))]
+        return super().filters(kind, **kw)
+
+
+def test_wait_artifacts_fails_fast_when_the_repository_import_failed():
+    with pytest.raises(RuntimeError, match="error-import"):          # no 600 s wait for artifacts that will never come
+        api.wait_artifacts(["leaf1"], timeout=5, client=RepoAwareClient([], {}, "error-import"))
+
+
+def test_wait_artifacts_timeout_names_the_repository_status():
+    with pytest.raises(TimeoutError, match="syncing"):
+        api.wait_artifacts(["leaf1"], timeout=0, client=RepoAwareClient([], {}, "syncing"))
