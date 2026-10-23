@@ -1,7 +1,9 @@
 {#- Complete EOS startup-config of a leaf. `data` is the response of leaf_config.gql for one device.
     What moves comes from Infrahub: hostname, VLANs of the site, interfaces and their access VLAN, management address.
-    The rest is the fixed base of every leaf and lives here, not in the data model. Block order follows what EOS
-    prints in `show running-config`, so the diff shown by the agent stays readable. -#}
+    The rest is the fixed base of every leaf and lives here, not in the data model. Block order and the default lines
+    (`no service interface ...`, `system l1`) are those of cEOS-lab 4.36.2F `show running-config`: another release may
+    print other defaults, which preview_config then reports until they are added here. `aaa authorization exec default
+    local` is required for admin (privilege 15) to land in privileged mode over SSH and for `Cli -p 15`. -#}
 {% set d = data.DcimDevice.edges[0].node %}
 {#- Infrahub renders with Jinja2 in async mode, where `map` yields an async generator that `sort` cannot read:
     collect into plain lists first, then sort. -#}
@@ -17,6 +19,10 @@ no aaa root
 !
 username admin privilege 15 role network-admin secret admin
 !
+aaa authorization exec default local
+!
+no service interface inactive port-id allocation disabled
+!
 transceiver qsfp default-mode 4x10G
 !
 service routing protocols model multi-agent
@@ -25,13 +31,16 @@ hostname {{ d.name.value }}
 !
 spanning-tree mode mstp
 !
+system l1
+   unsupported speed action error
+   unsupported error-correction action error
+!
 {% for vlan in vlans | sort(attribute='vlan_id.value') %}
 vlan {{ vlan.vlan_id.value }}
    name {{ vlan.name.value }}
 !
 {% endfor %}
-management api http-commands
-   no shutdown
+aaa authorization exec default local
 !
 {% for intf in interfaces | sort(attribute='name.value') %}
 interface {{ intf.name.value }}

@@ -169,9 +169,10 @@ sudo containerlab deploy -t clab/vlan-lab.clab.yml --reconfigure
 uv run python scripts/wait_leafs.py --timeout 300
 
 step "8/9 the agent"
-uv run python agent.py --list-tools > /tmp/vlan-lab-tools.txt
+# the MCP servers chat on stderr while starting; kept in a file, shown only if the check fails
+uv run python agent.py --list-tools > /tmp/vlan-lab-tools.txt 2> /tmp/vlan-lab-agent.err || { tail -40 /tmp/vlan-lab-agent.err; fail "the agent could not start (see above)"; }
 for t in preview_config deploy_config send_show_command get_nodes node_upsert propose_changes; do
-  grep -qx "$t" /tmp/vlan-lab-tools.txt || fail "tool $t not listed by the agent (see uv run python agent.py --list-tools)"
+  grep -qx "$t" /tmp/vlan-lab-tools.txt || { tail -40 /tmp/vlan-lab-agent.err; fail "tool $t not listed by the agent (see uv run python agent.py --list-tools)"; }
 done
 echo "  $(wc -l < /tmp/vlan-lab-tools.txt | tr -d ' ') tools available"
 

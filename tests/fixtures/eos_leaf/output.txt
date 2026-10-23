@@ -3,6 +3,10 @@ no aaa root
 !
 username admin privilege 15 role network-admin secret admin
 !
+aaa authorization exec default local
+!
+no service interface inactive port-id allocation disabled
+!
 transceiver qsfp default-mode 4x10G
 !
 service routing protocols model multi-agent
@@ -10,6 +14,10 @@ service routing protocols model multi-agent
 hostname leaf1
 !
 spanning-tree mode mstp
+!
+system l1
+   unsupported speed action error
+   unsupported error-correction action error
 !
 vlan 10
    name USERS
@@ -20,8 +28,7 @@ vlan 20
 vlan 30
    name IOT
 !
-management api http-commands
-   no shutdown
+aaa authorization exec default local
 !
 interface Ethernet1
    description access port VLAN 10

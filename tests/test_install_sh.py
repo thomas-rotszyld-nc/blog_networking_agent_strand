@@ -69,3 +69,13 @@ def test_netmiko_mcp_runs_on_mcp_1x():
     assert "netmiko-mcp==0.2.0" in mcp_json and "mcp<2" in mcp_json
     s = (ROOT / "install.sh").read_text()
     assert "mcp<2" in s and "uv tool install" not in s   # the same uvx environment as .mcp.json, pre-built at install
+
+
+def test_reimport_waits_for_the_re_rendering():
+    # right after an import the old artifacts are still Ready: without --until-changed the script downloads stale files
+    assert "--until-changed" in (ROOT / "scripts/reimport.sh").read_text()
+
+
+def test_install_sh_keeps_mcp_server_noise_out_of_the_tool_check():
+    s = (ROOT / "install.sh").read_text()
+    assert "vlan-lab-agent.err" in s        # MCP servers chat on stderr at startup; shown only when the check fails

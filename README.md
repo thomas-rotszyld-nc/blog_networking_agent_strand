@@ -75,8 +75,10 @@ sh drift.sh --reset      # redeploys both leafs from Infrahub's renderings
 - **`.infrahub.yml`, `infrahub/queries/leaf_config.gql`, `infrahub/templates/eos_leaf.j2`**: what Infrahub reads when
   it clones this repository. One GraphQL query (a device, its site's VLANs, its interfaces and their access VLAN), one
   Jinja2 template rendering the complete EOS startup-config of a leaf, one artifact definition targeting the `leafs`
-  group. What moves comes from the data; the fixed base of every leaf lives in the template. The template is tested
-  offline with the SDK's testing framework (`tests/test_transforms.yml`, fixtures in `tests/fixtures/eos_leaf`).
+  group. What moves comes from the data; the fixed base of every leaf lives in the template, aligned with what
+  cEOS-lab **4.36.2F** prints in `show running-config` (another release may print other default lines: `preview_config`
+  reports them, add them to the template). The template is tested offline with the SDK's testing framework
+  (`tests/test_transforms.yml`, fixtures in `tests/fixtures/eos_leaf`).
 - **`infrahub/schema/`**: unmodified copies of `opsmill/schema-library` (base dcim, ipam, location, organization;
   extensions `location_site` and `vlan`) at commit `26336e90…`, Apache-2.0. **`infrahub/objects/`**: the lab data as
   Infrahub object files (site, VLAN group, three VLANs, two leafs with their interfaces and management addresses, the

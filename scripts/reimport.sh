@@ -6,5 +6,5 @@ cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 echo "== re-importing the repository in Infrahub"
 uv run python -c "from vlanlab.infrahub_api import reimport_repository; reimport_repository()"
-echo "== waiting for the rendered startup-configs"
-uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated
+echo "== waiting for the re-rendered startup-configs (the old ones stay Ready until the worker is done)"
+uv run python scripts/wait_artifacts.py leaf1 leaf2 --out clab/generated --until-changed
