@@ -16,6 +16,16 @@ VM. Nothing in the repository depends on OrbStack; it is just the VM used by the
 
 Reach Infrahub from macOS through the VM address (OrbStack publishes `http://<vm-name>.orb.local:8000`).
 
+Two traps met on the first run:
+
+- **`orb -m <vm> <command>` forwards the macOS environment into the VM.** A `.zshrc` exporting
+  `DOCKER_DEFAULT_PLATFORM=linux/amd64` made Docker pull amd64 images on the arm64 VM and emulate the whole Infrahub
+  stack. `install.sh` now unsets the variable; when driving the VM from macOS, prefer `ssh <vm>@orb`, which starts a
+  clean login shell.
+- **Re-cloning the repository loses `.env`, but the Infrahub volumes keep the tokens of the first run.** Every
+  `infrahubctl` call then fails with `Invalid token`. `install.sh` checks the token right after Infrahub answers and
+  points to the remedy: `sh uninstall.sh --purge && sh install.sh`.
+
 ## Development loop
 
 - Data (`infrahub/objects`, `infrahub/schema`): edit, then `uv run infrahubctl object load infrahub/objects` (or
