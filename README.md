@@ -1,5 +1,7 @@
 # Infrahub intent-to-deploy lab
 
+Blog Article: https://network-codify.com/blog/construire-un-agent-reseau-avec-strands
+
 A Strands agent sits between [Infrahub](https://github.com/opsmill/infrahub) and two Arista cEOS switches running under
 Containerlab. You ask it to change the intent; Infrahub renders the switch configurations; a human reviews and merges;
 the agent deploys what Infrahub rendered and verifies. Companion repository of a blog article on Strands Agents
